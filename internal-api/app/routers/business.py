@@ -54,6 +54,13 @@ def submit_evidence(member: Principal = Depends(member_via_transfer)):
     return _todo("2주차")
 
 
+@router.get("/evidence-files")
+def list_evidence(principal: Principal = Depends(require(Role.DATA_ADMIN))):
+    """나에게 배정된 증빙 목록만 (file_id, 회원 가명 ID, 접수일, 상태, 삭제 기한). 원본 내용은 넣지 않는다.
+    ※ 명세 외 추가 (2026-11-05 합의): 심사자가 열람할 file_id 를 알기 위해 필요 (2주차)."""
+    return _todo("2주차")
+
+
 @router.get("/evidence-files/{file_id}/content")
 def read_evidence(file_id: str, principal: Principal = Depends(require(Role.DATA_ADMIN))):
     """배정된 데이터 관리자만, 심사 중에만 복호화 열람 (2주차)."""

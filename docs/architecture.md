@@ -104,7 +104,7 @@
 | internal-api | `GET /api/members`, `GET /api/members/{member_id}` | counselor | 2주차 |
 | internal-api | `POST /api/admin/member-exports` | data_admin | 3주차 |
 | internal-api | `POST /api/evidence-files` | transfer-api 서비스 + 회원 | 2주차 |
-| internal-api | `GET /api/evidence-files/{file_id}/content`, `POST …/{file_id}/review` | data_admin | 2주차 |
+| internal-api | `GET /api/evidence-files` (명세 외 추가: 배정된 증빙 목록), `GET /api/evidence-files/{file_id}/content`, `POST …/{file_id}/review` | data_admin | 2주차 |
 | internal-api | `POST /api/internal/disclosure-checks` | transfer-api 서비스 | 3주차 |
 | transfer-api | `POST /api/transfer-files`, `POST·GET /api/export-requests`, `GET /api/export-requests/{request_id}` | counselor(본인) / approver | 3주차 |
 | transfer-api | `POST …/{request_id}/approve`, `…/reject`, `POST /api/approvals/{approval_id}/revoke` | approver | 3주차 |
@@ -168,3 +168,19 @@ GitHub 조직 `privacygate-matchmaking`에 세 레포를 두고, 같은 상위 �
 
 - [ ] 회사 이름 (현재 "PrivacyGate 결혼정보회사(가상)")
 - [ ] 서비스 간 TLS 적용 시점 (2주차 제안), Wazuh 실행 PC (메모리 4GB 이상)
+
+## 9. 명세 대비 추가·변경 기록
+
+명세서에 없던 항목은 팀 합의 후 추가하고 여기에 남긴다.
+
+| 날짜 | 항목 | 이유 |
+| --- | --- | --- |
+| 11/05 | 보조 네트워크 5개 + 공개 포트용 3개 (명세의 3개 망 외) | 서비스 쌍마다 망을 나눠 external-api가 내부 자료와 망을 공유하지 않게 함 |
+| 11/05 | Keycloak 클라이언트 `transfer-api`, `external-api`, `internal-api` | 서버 간 호출을 서비스 토큰으로 검증 |
+| 11/05 | 오류 코드 `NOT_FOUND`, `INVALID_REQUEST`, `INTERNAL_ERROR` | 명세의 404·422·500 상태에 대응하는 코드 |
+| 11/05 | internal-api의 반출 경로(`/api/export-requests` 등) 전달 | 직원 화면이 서비스 인증정보 없이 중계를 호출하도록 internal-api가 직원 토큰을 붙여 전달 |
+| 11/05 | 실행 환경·DB 스키마·infra를 `privacygate` 레포에 둠 | 기존 레포 운영 방식 유지 (패키지는 `src/`, 이미지에는 패키지 파일만 복사) |
+| 11/05 | 회원 증빙 제출 경로 `POST /api/me/evidence-files`(external-api), `POST /api/internal/evidence-submissions`(transfer-api) | 증빙은 회원이 제출하며 external-api는 증빙 저장소에 닿을 수 없으므로 중계를 거침 |
+| 11/05 | 개발용 직원 OTP 끄기 `REQUIRE_STAFF_OTP` (기본 true) | 개발 편의. 시연·평가는 반드시 켬 |
+| 11/05 | 직원 로그인 테마(한국어), internal-web 클라이언트에만 적용 | 직원 화면과 같은 디자인, 회원 화면은 팀원 담당 |
+| 11/05 | `GET /api/evidence-files` (data_admin, 배정된 증빙 목록) | 심사자가 열람할 file_id를 알기 위해 필요. 원본 내용은 포함하지 않음 |

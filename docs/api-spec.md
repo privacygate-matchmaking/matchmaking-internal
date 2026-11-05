@@ -25,6 +25,7 @@ Keycloak client: `internal-web`, `external-web` · 쿠키: `internal_session`, `
 | GET | /api/members/{member_id} | counselor | 담당 회원 상세. 담당이 아니면 404 |
 | POST | /api/admin/member-exports | data_admin | 전체 회원 내보내기 (공격 ① 대상) |
 | POST | /api/evidence-files | 서비스: transfer-api + 회원 토큰 | **회원** 증빙 제출 → AES-GCM 암호화 후 evidence-storage (직원은 제출 불가) |
+| GET | /api/evidence-files | data_admin | 나에게 배정된 증빙 목록 (file_id, 회원 가명 ID, 접수일, 상태, 삭제 기한, 원본 내용 없음) ※명세 외 추가 |
 | GET | /api/evidence-files/{file_id}/content | data_admin | 배정된 증빙만, 심사 중에만 열람 |
 | POST | /api/evidence-files/{file_id}/review | data_admin | 심사 결과 저장, 원본 삭제 기한 설정 |
 | POST | /api/internal/disclosure-checks | 서비스: transfer-api | 수신자-회원 관계·동의 확인 (결과만 응답) |
