@@ -58,6 +58,8 @@
 4. `sub`(= `user_id`)로 `users` 테이블을 조회해 활성 직원인지 확인하고 서버 세션을 만든다.
 5. 브라우저에는 무작위 세션 ID만 `internal_session` 쿠키(HttpOnly·Secure·SameSite=Strict)로 준다.
 
+직원 OTP는 기본으로 켜져 있고, 개발 중에만 `.env`의 `REQUIRE_STAFF_OTP=false`로 끌 수 있다(keycloak-setup 일회성 작업이 적용). 시연·평가는 반드시 `true`로 한다.
+
 회원은 external-api가 같은 방식(client `external-web`, 쿠키 `external_session`)으로 처리하고 TOTP 없이 ID·비밀번호만 쓴다.
 
 **인가 원칙**
