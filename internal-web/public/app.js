@@ -15,8 +15,9 @@ async function api(path, options = {}) {
 // 오류 응답 {"error": {code, message, trace_id}} 를 한 줄로
 async function describe(res) {
   try {
-    const { error } = await res.json();
-    if (error) return `${error.message} (${error.code}, 추적번호 ${error.trace_id})`;
+    const body = await res.json();
+    if (body.error) return `${body.error.message} (${body.error.code}, 추적번호 ${body.error.trace_id})`;
+    if (res.status === 501) return "아직 구현되지 않은 기능입니다 (501).";
   } catch (_) { /* 본문 없음 */ }
   return `응답 ${res.status}`;
 }
@@ -27,10 +28,15 @@ function toKst(iso) {
 }
 window.toKst = toKst;
 
+function showResult(el, text, ok) {
+  el.textContent = text;          // textContent 만 사용 (서버 문자열을 HTML 로 해석하지 않음)
+  el.className = `result ${ok ? "ok" : "err"}`;
+  el.hidden = false;
+}
+
 function showLogin() {
   $("login-view").hidden = false;
   $("app-view").hidden = true;
-  $("user-box").hidden = true;
   if (new URLSearchParams(location.search).get("login") === "failed") {
     $("login-msg").textContent = "로그인하지 못했습니다. 직원 계정인지 확인하세요.";
     $("login-msg").hidden = false;
@@ -39,23 +45,31 @@ function showLogin() {
 
 function showApp() {
   const { pseudo_id, role } = state.me;
+  const roleName = ROLE_NAMES[role] || role;
   $("login-view").hidden = true;
   $("app-view").hidden = false;
-  $("user-box").hidden = false;
-  $("user-label").textContent = `${pseudo_id} · ${ROLE_NAMES[role] || role}`;
+  $("user-label").textContent = `${pseudo_id} · ${roleName}`;
+  $("avatar").textContent = roleName.charAt(0);
+  $("side-user").textContent = pseudo_id;
+  $("side-role").textContent = roleName;
+
   let first = null;
-  for (const tab of $("tabs").querySelectorAll("button")) {
-    const visible = tab.dataset.roles.split(",").includes(role);
-    tab.hidden = !visible;
-    if (visible && !first) first = tab.dataset.view;
-    tab.onclick = () => selectView(tab.dataset.view);
+  for (const btn of $("nav").querySelectorAll("button")) {
+    const visible = btn.dataset.roles.split(",").includes(role);
+    btn.hidden = !visible;
+    if (visible && !first) first = btn.dataset.view;
+    btn.onclick = () => selectView(btn.dataset.view);
   }
   if (first) selectView(first);
 }
 
 function selectView(name) {
-  for (const tab of $("tabs").querySelectorAll("button")) tab.classList.toggle("active", tab.dataset.view === name);
-  for (const view of document.querySelectorAll(".view")) view.hidden = view.dataset.view !== name;
+  for (const btn of $("nav").querySelectorAll("button")) btn.classList.toggle("active", btn.dataset.view === name);
+  for (const view of document.querySelectorAll(".view")) {
+    const on = view.dataset.view === name;
+    view.hidden = !on;
+    if (on) $("crumb").textContent = `PrivacyGate　/　${view.dataset.title}`;
+  }
 }
 
 async function logout() {
@@ -64,8 +78,14 @@ async function logout() {
 }
 
 async function runExport() {
-  const res = await api("/api/admin/member-exports", { method: "POST" });
-  $("export-result").textContent = res.ok ? "요청 완료" : await describe(res);
+  const btn = $("export-btn");
+  btn.disabled = true;
+  try {
+    const res = await api("/api/admin/member-exports", { method: "POST" });
+    showResult($("export-result"), res.ok ? "요청 완료" : await describe(res), res.ok);
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 async function init() {
