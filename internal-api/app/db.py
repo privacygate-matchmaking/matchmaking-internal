@@ -1,4 +1,4 @@
-"""PostgreSQL 연결 풀 (pg_app 계정)."""
+"""PostgreSQL 연결 풀 (app_user 계정)."""
 from contextlib import contextmanager
 from typing import Iterator, Optional
 
