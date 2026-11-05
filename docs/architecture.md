@@ -92,6 +92,10 @@
 | 연결 | A가 파일을 반출 대기에 올리고 file_id를 member_b에게 전달 | 검사(scan_status)와 승인(approver, 신청자 제외) 분리 | 승인 없이 대기 | 승인 없으면 전달 대상 아님 |
 | ② 외부 | member_b가 자기 정상 승인 건 다운로드 요청의 file_id를 A가 준 값으로 변경 | transfer-api: delivery_id → 승인 파일(file_id·file_version·file_hash)·수신자·동의·만료 검증 | 수신자만 확인해 비승인 파일 반환 | 403 APPROVAL_MISMATCH, 자료 미반환 |
 
+**비교 시연 방식**: 비교 API를 따로 두지 않고 같은 경로를 `.env`의 `GATE_MODE`로 전환한다. `enforce`(기본)는 모든 통제를 적용하고, `baseline`은 위 표의 ①·② 차단 지점만 끈다(로그인·세션·CSRF·감사 로그는 유지). baseline에서 통제를 건너뛴 요청은 감사 로그 reason에 남고 내부 화면 상단에 경고가 뜬다. 시연이 끝나면 enforce로 되돌린다.
+
+전체 회원 내보내기 결과 파일은 서버 내부에만 두고 `export_id`와 건수만 응답한다. 브라우저로 내려받는 경로는 두지 않는다.
+
 모든 거부는 trace_id·가명 ID·경로·사유 코드로 JSON 로그에 남고, Wazuh 규칙이 공격 ①②와 같은 계정의 반복 거부(1분 3회)를 경보한다. 차단 여부는 경보가 아니라 API 응답과 파일 상태로 판단한다.
 
 ## 6. API 목록
@@ -106,12 +110,13 @@
 | internal-api | `POST /api/evidence-files` | transfer-api 서비스 + 회원 | 2주차 |
 | internal-api | `GET /api/evidence-files` (명세 외 추가: 배정된 증빙 목록), `GET /api/evidence-files/{file_id}/content`, `POST …/{file_id}/review` | data_admin | 2주차 |
 | internal-api | `POST /api/internal/disclosure-checks` | transfer-api 서비스 | 3주차 |
+| internal-api | `GET /api/internal/my-evidence-files`, `GET·POST /api/internal/my-consents`, `POST /api/internal/my-consents/{consent_id}/revoke` (명세 외 추가) | transfer-api 서비스 + 회원 | 2~3주차 |
 | transfer-api | `POST /api/transfer-files`, `POST·GET /api/export-requests`, `GET /api/export-requests/{request_id}` | counselor(본인) / approver | 3주차 |
 | transfer-api | `POST …/{request_id}/approve`, `…/reject`, `POST /api/approvals/{approval_id}/revoke` | approver | 3주차 |
 | transfer-api | `POST /api/internal/delivery-queries`, `GET /api/internal/deliveries/{delivery_id}/download` | external-api 서비스 + 회원 | 3주차 |
-| transfer-api | `POST /api/internal/evidence-submissions` (명세 외 추가) | external-api 서비스 + 회원 | 2주차 |
+| transfer-api | `POST·GET /api/internal/evidence-submissions`, `GET·POST /api/internal/member-consents`, `POST /api/internal/member-consents/{consent_id}/revoke` (명세 외 추가, 전달만) | external-api 서비스 + 회원 | 2~3주차 |
 | external-api | `GET /api/me/deliveries`, `GET /api/me/deliveries/{delivery_id}/download` | member | 3주차 |
-| external-api | `POST /api/me/evidence-files` (명세 외 추가) | member | 2주차 |
+| external-api | `POST·GET /api/me/evidence-files`, `GET·POST /api/me/consents`, `POST /api/me/consents/{consent_id}/revoke` (명세 외 추가) | member | 2~3주차 |
 
 오류는 `{"error": {"code", "message", "trace_id"}}` 형식이다. 코드: AUTH_REQUIRED(401), ACCESS_DENIED·APPROVAL_MISMATCH·APPROVAL_EXPIRED·CONSENT_INVALID(403), NOT_FOUND(404), INVALID_STATE(409), INVALID_REQUEST(422), INTERNAL_ERROR(500). 판단 근거는 감사 로그에만 남긴다.
 
@@ -121,7 +126,8 @@
 
 | 저장소 | 테이블·내용 | 앱 권한 |
 | --- | --- | --- |
-| matchmaking_business | `users`(user_id=Keycloak sub, 가명 ID, 역할, 활성), `members`, `assignments`, `consents`(consent_id, purpose, expires_at) | 읽기 |
+| matchmaking_business | `users`(user_id=Keycloak sub, 가명 ID, 역할, 활성), `members`, `assignments` | 읽기 |
+| matchmaking_business | `consents`(consent_id, 상대 회원, 항목, purpose, expires_at, revoked_at) | 읽기·추가·수정 (삭제 불가, 철회는 revoked_at) |
 | matchmaking_business | `evidence_files`(file_id, 저장 키, key_id, file_hash, 배정 심사자, 삭제 기한), `evidence_reviews` | 읽기·쓰기 |
 | matchmaking_business | `login_flows`, `sessions`(세션 ID 해시, CSRF, 토큰은 서버만 보관) | 읽기·쓰기·삭제 |
 | matchmaking_transfer | `transfer_files`(file_id, file_version, file_hash, scan_status), `export_requests`(request_id, requester_id, recipient_id, purpose, consent_id, request_status, expires_at) | 읽기·쓰기 |
@@ -131,6 +137,8 @@
 | transfer-staging / transfer-verified | 검사 전 / 검사 통과 파일 | transfer-api만 마운트 |
 
 감사 로그는 DB와 JSON 파일(`audit-logs` 볼륨)에 함께 쓴다. 필드는 ts·service·trace_id·actor(가명)·role·action(경로 템플릿)·target_type·target_id·result·reason이며, 자료 본문·연락처·비밀번호·세션·토큰 값은 남기지 않는다(그 외 필드는 기록 단계에서 버린다). 증빙 암호화 키는 Docker secret 파일로 주입한다.
+
+**증빙 기한 삭제**: internal-api 안에서 주기적으로 실행되는 작업이 삭제 기한이 지난 증빙 원본을 evidence-storage에서 지우고 상태를 `deleted`로 바꾼다(법적 보존 `legal_hold`는 제외). 실패하면 감사 로그에 `evidence_delete` error를 남기고 Wazuh가 경보한다. 별도 API는 없다.
 
 ## 8. 실행 환경과 저장소 구성
 
@@ -184,3 +192,7 @@ GitHub 조직 `privacygate-matchmaking`에 세 레포를 두고, 같은 상위 �
 | 11/05 | 개발용 직원 OTP 끄기 `REQUIRE_STAFF_OTP` (기본 true) | 개발 편의. 시연·평가는 반드시 켬 |
 | 11/05 | 직원 로그인 테마(한국어), internal-web 클라이언트에만 적용 | 직원 화면과 같은 디자인, 회원 화면은 팀원 담당 |
 | 11/05 | `GET /api/evidence-files` (data_admin, 배정된 증빙 목록) | 심사자가 열람할 file_id를 알기 위해 필요. 원본 내용은 포함하지 않음 |
+| 11/05 | 비교 시연 모드 `GATE_MODE=enforce/baseline` (API 추가 없음) | 제안서의 "비교 API vs PrivacyGate"를 같은 경로에서 전환해 비교. 기본 enforce |
+| 11/05 | 관리자 내보내기 결과는 서버 내부 보관, `export_id`·건수만 응답 | 전체 회원 파일이 브라우저로 나가지 않게 함 (내려받기 API 추가 안 함) |
+| 11/05 | 회원 증빙 심사 상태 조회 `GET /api/me/evidence-files` → `GET /api/internal/evidence-submissions` → `GET /api/internal/my-evidence-files` | 회원이 제출 결과를 확인 (상태만, 원본·심사자 정보 없음) |
+| 11/05 | 회원 동의 등록·철회 `/api/me/consents` → `/api/internal/member-consents` → `/api/internal/my-consents` | 동의를 시험 데이터가 아닌 회원 조작으로 관리, 동의 철회 시나리오 시연 |

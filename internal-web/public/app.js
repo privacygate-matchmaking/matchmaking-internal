@@ -52,6 +52,7 @@ function showApp() {
   $("avatar").textContent = roleName.charAt(0);
   $("side-user").textContent = pseudo_id;
   $("side-role").textContent = roleName;
+  $("baseline-banner").hidden = state.me.gate_mode !== "baseline";
 
   let first = null;
   for (const btn of $("nav").querySelectorAll("button")) {

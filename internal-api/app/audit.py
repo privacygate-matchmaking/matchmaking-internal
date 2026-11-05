@@ -26,8 +26,11 @@ def writer() -> AuditWriter:
 
 
 def allow(request: Request, *, action: str | None = None, target_type: str | None = None,
-          target_id: str | None = None) -> None:
-    audit_request(writer(), request, "allow", action=action, target_type=target_type, target_id=target_id)
+          target_id: str | None = None, reason: str | None = None) -> None:
+    # baseline 모드에서 통제를 건너뛴 요청은 사유에 남긴다
+    reason = reason or getattr(request.state, "gate_bypass", None)
+    audit_request(writer(), request, "allow", action=action, target_type=target_type,
+                  target_id=target_id, reason=reason)
 
 
 def deny(request: Request, reason: str, *, action: str | None = None) -> None:

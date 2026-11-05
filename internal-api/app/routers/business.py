@@ -5,6 +5,7 @@
 """
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
+from privacygate import gate_mode
 from privacygate.policy import STAFF_ROLES, Principal, Role
 
 from .. import audit
@@ -21,7 +22,8 @@ def _todo(week: str) -> JSONResponse:
 def me(request: Request, principal: Principal = Depends(require(*STAFF_ROLES))):
     """화면 표시용. 역할은 서버가 매 요청 확인하므로 화면은 이 값을 표시에만 쓴다."""
     return {"user_id": principal.user_id, "pseudo_id": principal.pseudo_id, "role": principal.role,
-            "csrf_token": request.state.csrf_token}
+            "csrf_token": request.state.csrf_token,
+            "gate_mode": gate_mode.current()}      # baseline 이면 화면 상단에 경고 표시
 
 
 # ---------- 회원 ----------
@@ -39,8 +41,12 @@ def get_member(member_id: str, principal: Principal = Depends(require(Role.COUNS
 
 # ---------- 관리자 전체 회원 내보내기 (공격 ① 대상) ----------
 @router.post("/admin/member-exports")
-def create_member_export(request: Request, principal: Principal = Depends(require(Role.DATA_ADMIN)),
+def create_member_export(request: Request,
+                         principal: Principal = Depends(require(Role.DATA_ADMIN, baseline_open=True)),
                          _csrf: None = Depends(require_csrf)):
+    """전체 회원 내보내기. 결과 파일은 서버 내부 저장소에만 두고 export_id 와 건수만 응답한다
+    (브라우저로 내려받는 경로는 두지 않음, 11/05 합의).
+    GATE_MODE=baseline 이면 역할 검사를 건너뛴다 (공격 ① 비교 시연용)."""
     audit.allow(request, target_type="member_export")
     return _todo("3주차")
 
@@ -78,4 +84,31 @@ def review_evidence(file_id: str, principal: Principal = Depends(require(Role.DA
 @router.post("/internal/disclosure-checks")
 def disclosure_check(claims: dict = Depends(require_service("transfer-api"))):
     """transfer-api 서비스 토큰만 허용. 수신자-대상 회원 관계·동의 유효성만 답한다 (3주차)."""
+    return _todo("3주차")
+
+
+# ---------- 회원 본인 기능 (회원 → external-api → transfer-api → 여기) ※ 명세 외 추가, 11/05 합의 ----------
+# 모두 transfer-api 서비스 토큰 + 회원 access token 을 검증하고, 회원 토큰 sub 의 회원 본인 자료만 다룬다.
+
+@router.get("/internal/my-evidence-files")
+def my_evidence_files(member: Principal = Depends(member_via_transfer)):
+    """내가 제출한 증빙의 심사 상태만 (file_id, 접수일, 상태, 심사 결과). 원본 내용·심사자 정보는 주지 않는다 (2주차)."""
+    return _todo("2주차")
+
+
+@router.get("/internal/my-consents")
+def my_consents(member: Principal = Depends(member_via_transfer)):
+    """내 동의 목록 (consent_id, 상대 회원 가명 ID, 항목, 목적, 만료, 철회 여부) (3주차)."""
+    return _todo("3주차")
+
+
+@router.post("/internal/my-consents")
+def create_consent(member: Principal = Depends(member_via_transfer)):
+    """동의 등록: 상대 회원·항목(profile/photo/contact)·목적·만료일. 본인 명의로만 (3주차)."""
+    return _todo("3주차")
+
+
+@router.post("/internal/my-consents/{consent_id}/revoke")
+def revoke_consent(consent_id: str, member: Principal = Depends(member_via_transfer)):
+    """동의 철회: revoked_at 기록. 이후 이 동의에 기댄 전달은 CONSENT_INVALID 로 막힌다 (3주차)."""
     return _todo("3주차")

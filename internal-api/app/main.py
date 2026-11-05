@@ -3,6 +3,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from privacygate import gate_mode
 from privacygate.web import assert_all_routes_guarded, install
 
 from . import audit, db
@@ -10,6 +11,10 @@ from .config import get_settings
 from .routers import auth, business, transfer
 
 logging.basicConfig(level=logging.INFO)
+
+# GATE_MODE 값이 잘못되면 여기서 시작을 멈춘다
+if gate_mode.is_baseline():
+    logging.warning("GATE_MODE=baseline: 시연 비교 모드 (공격 ①② 대상 통제 꺼짐). 시연 후 enforce 로 되돌릴 것")
 
 
 @asynccontextmanager

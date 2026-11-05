@@ -25,3 +25,4 @@
 .login .brand{color:var(--ink);margin:0 0 18px;font-size:24px}
 .login .brand span{color:var(--blue)}
 a.btn{text-decoration:none;display:inline-block}
+.notice.danger{background:#ffebed;color:#a12d3c;border-color:#f6c9cf;margin:0 0 22px;font-weight:650}

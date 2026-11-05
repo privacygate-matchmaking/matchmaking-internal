@@ -14,7 +14,7 @@
 | GET | /auth/login | Keycloak 로그인 시작 (Code + PKCE S256, state·nonce) |
 | GET | /auth/callback | 코드 교환·ID 토큰 검증 → 세션 쿠키 발급 |
 | POST | /auth/logout | 서버 세션 삭제 + Keycloak 로그아웃 주소 반환 |
-| GET | /api/me | 현재 사용자 (user_id, pseudo_id, role, csrf_token) |
+| GET | /api/me | 현재 사용자 (user_id, pseudo_id, role, csrf_token, gate_mode) |
 
 Keycloak client: `internal-web`, `external-web` · 쿠키: `internal_session`, `external_session` (HttpOnly, SameSite=Strict, Secure)
 
@@ -23,12 +23,16 @@ Keycloak client: `internal-web`, `external-web` · 쿠키: `internal_session`, `
 |---|---|---|---|
 | GET | /api/members | counselor | 담당 회원 목록 (허용 항목만) |
 | GET | /api/members/{member_id} | counselor | 담당 회원 상세. 담당이 아니면 404 |
-| POST | /api/admin/member-exports | data_admin | 전체 회원 내보내기 (공격 ① 대상) |
+| POST | /api/admin/member-exports | data_admin | 전체 회원 내보내기 (공격 ① 대상). 결과 파일은 서버 내부에만 두고 `export_id`·건수만 응답 (내려받기 경로 없음) |
 | POST | /api/evidence-files | 서비스: transfer-api + 회원 토큰 | **회원** 증빙 제출 → AES-GCM 암호화 후 evidence-storage (직원은 제출 불가) |
 | GET | /api/evidence-files | data_admin | 나에게 배정된 증빙 목록 (file_id, 회원 가명 ID, 접수일, 상태, 삭제 기한, 원본 내용 없음) ※명세 외 추가 |
 | GET | /api/evidence-files/{file_id}/content | data_admin | 배정된 증빙만, 심사 중에만 열람 |
 | POST | /api/evidence-files/{file_id}/review | data_admin | 심사 결과 저장, 원본 삭제 기한 설정 |
 | POST | /api/internal/disclosure-checks | 서비스: transfer-api | 수신자-회원 관계·동의 확인 (결과만 응답) |
+| GET | /api/internal/my-evidence-files | 서비스: transfer-api + 회원 토큰 | 내 증빙 심사 상태 (원본·심사자 정보 없음) ※명세 외 추가 |
+| GET | /api/internal/my-consents | 서비스: transfer-api + 회원 토큰 | 내 동의 목록 ※명세 외 추가 |
+| POST | /api/internal/my-consents | 서비스: transfer-api + 회원 토큰 | 동의 등록 (상대 회원·항목·목적·만료) ※명세 외 추가 |
+| POST | /api/internal/my-consents/{consent_id}/revoke | 서비스: transfer-api + 회원 토큰 | 동의 철회 ※명세 외 추가 |
 
 ## 중계 (transfer-api)
 내부 직원 화면은 internal-api 를 거쳐 호출한다 (internal-api 가 1차 역할 확인 후, 서버에 보관한 사용자 access token 을 붙여 전달).
@@ -45,6 +49,9 @@ Keycloak client: `internal-web`, `external-web` · 쿠키: `internal_session`, `
 | POST | /api/internal/delivery-queries | 서비스: external-api + 회원 토큰 | 회원에게 온 전달 목록 |
 | GET | /api/internal/deliveries/{delivery_id}/download | 서비스: external-api + 회원 토큰 | 승인 파일 다운로드 |
 | POST | /api/internal/evidence-submissions | 서비스: external-api + 회원 토큰 | 회원 증빙을 internal-api 로 전달만 (중계에 저장 안 함) ※명세 외 추가 |
+| GET | /api/internal/evidence-submissions | 서비스: external-api + 회원 토큰 | 내 증빙 심사 상태 전달 ※명세 외 추가 |
+| GET·POST | /api/internal/member-consents | 서비스: external-api + 회원 토큰 | 내 동의 목록·등록 전달 ※명세 외 추가 |
+| POST | /api/internal/member-consents/{consent_id}/revoke | 서비스: external-api + 회원 토큰 | 동의 철회 전달 ※명세 외 추가 |
 
 - 검사 통과(`passed`)와 제공 승인(`approved`)은 별개다. 반출 금지 자료는 승인으로도 허용되지 않는다.
 - 직원 승인과 회원 동의를 각각 확인한다 (동의는 disclosure-checks 로 internal-api 에 질의).
@@ -57,8 +64,15 @@ Keycloak client: `internal-web`, `external-web` · 쿠키: `internal_session`, `
 | GET | /api/me/deliveries | member | 나에게 온 전달 목록 (transfer-api 경유) |
 | GET | /api/me/deliveries/{delivery_id}/download | member | 승인 파일 다운로드 (transfer-api 경유) |
 | POST | /api/me/evidence-files | member | 증빙 제출 (transfer-api → internal-api 경유) ※명세 외 추가 |
+| GET | /api/me/evidence-files | member | 내 증빙 심사 상태 ※명세 외 추가 |
+| GET·POST | /api/me/consents | member | 내 동의 목록·등록 ※명세 외 추가 |
+| POST | /api/me/consents/{consent_id}/revoke | member | 동의 철회 ※명세 외 추가 |
 
 external-api 에는 업무 DB·증빙 저장소 접근 권한이 없다.
+
+## 동작 모드 (`GATE_MODE`)
+- `enforce`(기본): 모든 통제 적용.
+- `baseline`(시연 비교용): 공격 ①② 대상 통제만 끈다. ① `POST /api/admin/member-exports` 역할 검사 → 로그인한 직원이면 통과, ② 다운로드 승인 파일 검증 → 수신자만 확인하고 요청 file_id 제공. 로그인·세션·CSRF·감사 로그는 그대로이며, 통제를 건너뛴 요청은 감사 로그 reason 에 `baseline_role_check_off` 등으로 남는다. 내부 화면 상단에 경고가 표시된다.
 
 ## 상태 값
 - `scan_status`: pending / passed / blocked / error
