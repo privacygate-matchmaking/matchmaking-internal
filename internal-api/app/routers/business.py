@@ -45,7 +45,7 @@ def create_member_export(request: Request,
                          principal: Principal = Depends(require(Role.DATA_ADMIN, baseline_open=True)),
                          _csrf: None = Depends(require_csrf)):
     """전체 회원 내보내기. 결과 파일은 서버 내부 저장소에만 두고 export_id 와 건수만 응답한다
-    (브라우저로 내려받는 경로는 두지 않음, 11/05 합의).
+    (브라우저로 내려받는 경로는 두지 않음).
     GATE_MODE=baseline 이면 역할 검사를 건너뛴다 (공격 ① 비교 시연용)."""
     audit.allow(request, target_type="member_export")
     return _todo("3주차")
@@ -63,7 +63,7 @@ def submit_evidence(member: Principal = Depends(member_via_transfer)):
 @router.get("/evidence-files")
 def list_evidence(principal: Principal = Depends(require(Role.DATA_ADMIN))):
     """나에게 배정된 증빙 목록만 (file_id, 회원 가명 ID, 접수일, 상태, 삭제 기한). 원본 내용은 넣지 않는다.
-    ※ 명세 외 추가 (2026-11-05 합의): 심사자가 열람할 file_id 를 알기 위해 필요 (2주차)."""
+    ※ 명세 외 추가: 심사자가 열람할 file_id 를 알기 위해 필요 (2주차)."""
     return _todo("2주차")
 
 
@@ -87,7 +87,7 @@ def disclosure_check(claims: dict = Depends(require_service("transfer-api"))):
     return _todo("3주차")
 
 
-# ---------- 회원 본인 기능 (회원 → external-api → transfer-api → 여기) ※ 명세 외 추가, 11/05 합의 ----------
+# ---------- 회원 본인 기능 (회원 → external-api → transfer-api → 여기) ※ 명세 외 추가 ----------
 # 모두 transfer-api 서비스 토큰 + 회원 access token 을 검증하고, 회원 토큰 sub 의 회원 본인 자료만 다룬다.
 
 @router.get("/internal/my-evidence-files")
