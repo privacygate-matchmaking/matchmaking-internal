@@ -1,0 +1,13 @@
+# 비밀값 — 절대 커밋하지 않음
+.env
+infra/secrets/*
+!infra/secrets/.gitkeep
+*.key
+*.pem
+
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.DS_Store
+*.log

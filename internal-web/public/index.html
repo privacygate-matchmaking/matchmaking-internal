@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PrivacyGate 내부 업무</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">PrivacyGate <span class="brand-sub">내부 업무</span></div>
+    <div id="user-box" class="user-box" hidden>
+      <span id="user-label"></span>
+      <button id="logout-btn" type="button" class="btn-ghost">로그아웃</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="login-view" class="panel" hidden>
+      <h1>직원 로그인</h1>
+      <p class="muted">Keycloak 에서 ID·비밀번호와 OTP(TOTP) 로 로그인합니다.</p>
+      <p id="login-msg" class="error" hidden></p>
+      <a class="btn" href="/auth/login">로그인</a>
+    </section>
+
+    <section id="app-view" hidden>
+      <!-- 메뉴 표시는 편의 기능일 뿐, 권한은 서버가 매 요청 확인한다 -->
+      <nav class="tabs" id="tabs">
+        <button type="button" data-view="members"   data-roles="counselor">담당 회원</button>
+        <button type="button" data-view="requests"  data-roles="counselor">반출 신청</button>
+        <button type="button" data-view="reviews"   data-roles="data_admin">증빙 심사</button>
+        <button type="button" data-view="export"    data-roles="data_admin">전체 회원 내보내기</button>
+        <button type="button" data-view="approvals" data-roles="approver">반출 승인</button>
+      </nav>
+
+      <div class="panel view" data-view="members" hidden>
+        <h2>담당 회원</h2>
+        <p class="muted">GET /api/members — 담당 관계가 있는 회원의 허용 항목만 (2주차)</p>
+      </div>
+      <div class="panel view" data-view="requests" hidden>
+        <h2>반출 신청</h2>
+        <p class="muted">POST /api/transfer-files → 검사 통과 후 POST /api/export-requests (3주차)</p>
+      </div>
+      <div class="panel view" data-view="reviews" hidden>
+        <h2>증빙 심사</h2>
+        <p class="muted">배정된 증빙만 열람·심사 (2주차)</p>
+      </div>
+      <div class="panel view" data-view="export" hidden>
+        <h2>전체 회원 내보내기</h2>
+        <p class="muted">POST /api/admin/member-exports — data_admin 전용</p>
+        <button id="export-btn" type="button" class="btn">내보내기 실행</button>
+        <p id="export-result" class="muted"></p>
+      </div>
+      <div class="panel view" data-view="approvals" hidden>
+        <h2>반출 승인</h2>
+        <p class="muted">본인이 신청하지 않은 건만 승인·거절·회수 (3주차)</p>
+      </div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

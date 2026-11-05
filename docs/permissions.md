@@ -1,0 +1,27 @@
+# 권한 표 (PrivacyGate)
+
+| 역할 | 시험 계정 | 할 수 있는 일 | 자동으로 주지 않는 권한 |
+|---|---|---|---|
+| counselor | `counselor_a` (내부 공격자 A) | 담당 회원 조회, 반출 파일 업로드·신청, 본인 신청 조회 | 전체 회원 내보내기, 증빙 제출·열람, 승인 |
+| data_admin | `data_admin` | 전체 회원 내보내기, 배정된 증빙 열람·심사 | **반출 승인** |
+| approver | `approver` | 반출 신청 검토·승인·거절·회수 | **전체 내보내기, 원본 증빙 열람** |
+| member | `member_b` (외부 공범 B) | 본인 증빙 제출, 나에게 온 전달 목록·다운로드 (외부 화면만) | 내부 화면 로그인, 증빙 열람 |
+| (Keycloak 운영) | `infra_admin` | Keycloak 관리 콘솔 | 업무 데이터 접근 |
+
+규칙
+- 신원·역할은 서버 인증 정보(세션, Keycloak 서명 토큰)와 `matchmaking_business.users` 에서 확인한다. 요청 본문의 user_id 는 믿지 않는다.
+- internal-api 는 역할을 매 요청 DB 에서 다시 읽는다 (비활성화·역할 변경 즉시 반영).
+- transfer-api 는 업무 DB 가 없으므로 Keycloak 서명 토큰의 realm 역할로 확인한다. Keycloak 역할과 `users.role` 은 같게 관리한다.
+- 신청자 = 승인자이면 서버가 거부한다 (`privacygate.policy.can_decide_request`).
+- 직원 승인과 회원 동의는 각각 확인한다. 반출 금지 자료는 승인으로도 허용되지 않는다.
+- 권한 선언이 없는 `/api` 경로가 있으면 서버가 시작하지 않는다 (`assert_all_routes_guarded`).
+- 서버 간 호출(`/api/internal/*`)은 Keycloak 서비스 토큰의 `azp` 로 호출자를 확인한다.
+  - internal-api `/api/internal/disclosure-checks` ← `transfer-api`
+  - internal-api `/api/evidence-files` ← `transfer-api` (+ 회원 access token, 회원 증빙 제출)
+  - transfer-api `/api/internal/*` ← `external-api` (+ 회원 access token)
+
+인증
+- 직원: ID·비밀번호 + TOTP (첫 로그인에 OTP 등록 강제), 회원: ID·비밀번호
+- 5회 실패 시 잠금(점증 대기), 비밀번호 12자 이상
+- 세션: 유휴 30분, 최대 8시간, 로그인마다 새 세션 ID, 로그아웃 시 서버 세션·Keycloak 세션 종료
+- 브라우저 구간은 HTTPS 만 (internal-web·external-web·Keycloak 8443), 세션 쿠키 Secure·HttpOnly·SameSite=Strict
