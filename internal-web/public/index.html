@@ -49,133 +49,167 @@
       </div>
       <!-- 메뉴 표시는 편의 기능일 뿐, 권한은 서버가 매 요청 확인한다 -->
       <nav class="tabs" id="nav" aria-label="업무 메뉴">
-        <button type="button" class="tab" data-view="members"   data-roles="counselor">담당 회원 조회</button>
-        <button type="button" class="tab" data-view="admin"     data-roles="data_admin">회원 관리</button>
-        <button type="button" class="tab" data-view="approvals" data-roles="approver">조회 · 심사 · 승인</button>
+        <button type="button" class="tab" data-view="members"   data-roles="counselor,data_admin">담당 회원 조회</button>
+        <button type="button" class="tab" data-view="manage"    data-roles="counselor,data_admin">회원 관리</button>
+        <button type="button" class="tab" data-view="evidence"  data-roles="counselor,data_admin">회원·서류 조회·심사·승인</button>
+        <button type="button" class="tab" data-view="approvals" data-roles="approver">소개 자료 발송 승인</button>
       </nav>
 
-      <!-- 담당 회원 조회 + 반출 신청 (counselor) -->
+      <!-- ① 담당 회원 조회 (상담: 담당 회원 / 총관리자: 전체) -->
       <section class="view" data-view="members" data-title="담당 회원 조회" hidden>
-        <div class="page-heading"><div><span class="eyebrow">ASSIGNED MEMBERS</span><h1>담당 회원 조회</h1><p class="muted">나에게 배정된 회원만 보입니다. 회원의 유효한 동의를 골라 소개 자료 반출을 신청합니다.</p></div></div>
+        <div class="page-heading"><div><span class="eyebrow">ASSIGNED MEMBERS</span><h1>담당 회원 조회</h1><p class="muted" data-roles="counselor">나에게 배정된 회원만 보입니다. 서로 매칭된 회원에게 소개 자료를 보낼 수 있습니다.</p><p class="muted" data-roles="data_admin">총관리자는 전체 회원과 담당 배정을 봅니다.</p></div></div>
         <div class="content-layout"><div class="work">
-          <div class="section-title"><h2>담당 회원</h2><span class="muted" id="members-count"></span></div>
+          <div class="section-title"><h2>회원 목록</h2><span class="muted" id="members-count"></span></div>
           <div class="tablewrap">
             <table>
-              <thead><tr><th>회원(가명 ID)</th><th>출생연도</th><th>직업</th><th>관리</th></tr></thead>
+              <thead><tr><th>회원(가명 ID)</th><th>출생연도</th><th>직업</th><th>담당 직원</th><th>유효 동의</th><th>상태</th><th>관리</th></tr></thead>
               <tbody id="members-body"></tbody>
             </table>
-            <div class="empty" id="members-empty" hidden>담당 회원이 없습니다.</div>
+            <div class="empty" id="members-empty" hidden>회원이 없습니다.</div>
           </div>
           <div class="card mt16" id="member-detail" hidden>
-            <h2 id="member-detail-title"></h2>
-            <p class="muted">이 회원이 정보 주체인 동의입니다. 유효한 동의로만 반출을 신청할 수 있습니다.</p>
+            <div class="row-between"><h2 id="member-detail-title"></h2><span id="member-detail-status"></span></div>
+            <h3 class="mt16">매칭 현황</h3>
+            <p class="muted">회원이 외부 화면에서 서로 매칭을 누르면 양쪽 프로필 제공 동의(30일)가 자동으로 만들어집니다.</p>
             <div class="tablewrap">
               <table>
-                <thead><tr><th>수신 회원</th><th>항목</th><th>목적</th><th>만료</th><th>상태</th><th>관리</th></tr></thead>
+                <thead><tr><th>소개된 상대</th><th>이 회원</th><th>상대</th><th>상태</th></tr></thead>
+                <tbody id="matches-body"></tbody>
+              </table>
+              <div class="empty" id="matches-empty" hidden>소개된 상대가 없습니다.</div>
+            </div>
+            <h3 class="mt16">제공 동의</h3>
+            <div class="tablewrap">
+              <table>
+                <thead><tr><th>받는 회원</th><th>항목</th><th>목적</th><th>만료</th><th>상태</th><th data-roles="counselor">관리</th></tr></thead>
                 <tbody id="consents-body"></tbody>
               </table>
-              <div class="empty" id="consents-empty" hidden>등록된 동의가 없습니다.</div>
+              <div class="empty" id="consents-empty" hidden>동의가 없습니다.</div>
             </div>
           </div>
 
-          <div class="section-title" id="request-section"><h2>반출 신청</h2><span class="muted">① 파일 등록(형식 검사) → ② 신청 → 다른 승인자가 승인</span></div>
-          <div class="two">
-            <div class="card">
-              <h3>① 소개 자료 파일 등록</h3>
-              <p class="muted">소개 JSON(member_pseudo_id, age_band, job_group, introduction)만 검사를 통과합니다.</p>
-              <form class="form one" id="upload-form">
-                <label>파일<input type="file" name="file" accept="application/json,.json" required></label>
-                <div><button type="submit" class="btn primary">등록</button></div>
+          <div data-roles="counselor">
+            <div class="section-title" id="request-section"><h2>매칭 소개 자료 발송</h2><span class="muted">① 소개 자료 등록(형식 검사) → ② 발송 신청 → 승인자가 승인하면 상대 회원이 받음</span></div>
+            <div class="two">
+              <div class="card">
+                <h3>① 소개 자료 파일 등록</h3>
+                <p class="muted">소개 JSON(member_pseudo_id, age_band, job_group, introduction)만 검사를 통과합니다.</p>
+                <form class="form one" id="upload-form">
+                  <label>파일<input type="file" name="file" accept="application/json,.json" required></label>
+                  <div><button type="submit" class="btn primary">등록</button></div>
+                </form>
+                <p id="upload-result" class="result" hidden></p>
+              </div>
+              <div class="card">
+                <h3>② 발송 신청</h3>
+                <form class="form one" id="request-form">
+                  <label>파일 ID (file_id)<input type="text" name="file_id" required pattern="[0-9a-fA-F-]{36}"></label>
+                  <label>자료 주인 (담당 회원)<select name="member_id" id="req-member" required></select></label>
+                  <label>받는 회원 (매칭 동의)<select name="consent_id" id="req-consent" required></select></label>
+                  <label>목적<input type="text" name="purpose" value="introduction" required maxlength="64"></label>
+                  <label>제공 기한<select name="days" id="req-days"><option value="1">1일</option><option value="3">3일</option><option value="7" selected>7일 (최대)</option></select></label>
+                  <div><button type="submit" class="btn primary">신청</button></div>
+                </form>
+                <p id="request-result" class="result" hidden></p>
+              </div>
+            </div>
+            <div class="section-title"><h2>내 발송 신청 내역</h2></div>
+            <div class="tablewrap">
+              <table>
+                <thead><tr><th>신청 ID</th><th>파일</th><th>목적</th><th>상태</th><th>제공 기한</th><th>신청 시각</th></tr></thead>
+                <tbody id="requests-body"></tbody>
+              </table>
+              <div class="empty" id="requests-empty" hidden>신청 내역이 없습니다.</div>
+            </div>
+            <details class="card mt16 sub">
+              <summary>내보내기 결과 중계 등록</summary>
+              <p class="muted">본인이 만든 내보내기(export_id)만 등록할 수 있습니다. 전체 회원 파일은 검사에서 차단(blocked)됩니다.</p>
+              <form class="form inline" id="export-transfer-form">
+                <label>export_id<input type="text" name="export_id" required pattern="[0-9a-fA-F-]{36}"></label>
+                <div><button type="submit" class="btn">등록</button></div>
               </form>
-              <p id="upload-result" class="result" hidden></p>
-            </div>
-            <div class="card">
-              <h3>② 반출 신청</h3>
-              <form class="form one" id="request-form">
-                <label>파일 ID (file_id)<input type="text" name="file_id" required pattern="[0-9a-fA-F-]{36}"></label>
-                <label>정보 주체 (담당 회원)<select name="member_id" id="req-member" required></select></label>
-                <label>동의 (수신자)<select name="consent_id" id="req-consent" required></select></label>
-                <label>목적<input type="text" name="purpose" value="introduction" required maxlength="64"></label>
-                <label>반출 기한<select name="days" id="req-days"><option value="1">1일</option><option value="3">3일</option><option value="7" selected>7일 (최대)</option></select></label>
-                <div><button type="submit" class="btn primary">신청</button></div>
-              </form>
-              <p id="request-result" class="result" hidden></p>
-            </div>
+              <p id="export-transfer-result" class="result" hidden></p>
+            </details>
           </div>
-
-          <div class="section-title"><h2>내 신청 내역</h2></div>
-          <div class="tablewrap">
-            <table>
-              <thead><tr><th>신청 ID</th><th>파일</th><th>목적</th><th>상태</th><th>반출 기한</th><th>신청 시각</th></tr></thead>
-              <tbody id="requests-body"></tbody>
-            </table>
-            <div class="empty" id="requests-empty" hidden>신청 내역이 없습니다.</div>
-          </div>
-
-          <details class="card mt16 sub">
-            <summary>내보내기 결과 중계 등록</summary>
-            <p class="muted">본인이 만든 내보내기(export_id)만 등록할 수 있습니다. 전체 회원 파일은 검사에서 차단(blocked)됩니다.</p>
-            <form class="form inline" id="export-transfer-form">
-              <label>export_id<input type="text" name="export_id" required pattern="[0-9a-fA-F-]{36}"></label>
-              <div><button type="submit" class="btn">등록</button></div>
-            </form>
-            <p id="export-transfer-result" class="result" hidden></p>
-          </details>
-        </div><aside class="guide"><span class="eyebrow">STAFF GUIDE</span><h2>담당 회원 조회</h2><ol><li><p>담당 관계가 있는 회원만 보입니다. 이름·연락처는 화면에 나오지 않습니다.</p></li><li><p>반출은 회원 본인의 유효한 동의가 있을 때만 신청할 수 있습니다.</p></li><li><p>신청자는 자기 신청을 승인할 수 없습니다.</p></li><li><p>모든 조회·변경은 추적번호와 함께 감사 로그에 기록됩니다.</p></li></ol></aside></div>
+        </div><aside class="guide"><span class="eyebrow">STAFF GUIDE</span><h2>회원 조회</h2><ol><li><p>담당 관계가 있는 회원만 보입니다(총관리자는 전체). 이름·연락처는 화면에 나오지 않습니다.</p></li><li><p>소개 자료는 서로 매칭해 동의가 있는 상대에게만 보낼 수 있습니다.</p></li><li><p>발송은 다른 승인자가 승인해야 상대에게 전달됩니다.</p></li><li><p>모든 조회·변경은 추적번호와 함께 감사 로그에 기록됩니다.</p></li></ol></aside></div>
       </section>
 
-      <!-- 회원 관리: 전체 회원 + 내보내기 + 증빙 심사 (data_admin = 총관리자) -->
-      <section class="view" data-view="admin" data-title="회원 관리" hidden>
-        <div class="page-heading"><div><span class="eyebrow">MEMBER ADMINISTRATION</span><h1>회원 관리</h1><p class="muted">총관리자는 전체 회원과 담당 배정을 확인하고, 내보내기와 회원 증빙 심사를 처리합니다.</p></div></div>
+      <!-- ② 회원 관리: 정보 수정·탈퇴 (상담: 담당 회원 / 총관리자: 전체 + 내보내기) -->
+      <section class="view" data-view="manage" data-title="회원 관리" hidden>
+        <div class="page-heading"><div><span class="eyebrow">MEMBER ADMINISTRATION</span><h1>회원 관리</h1><p class="muted">회원 정보(출생연도·직업)를 수정하고 탈퇴를 처리합니다. 상담 직원은 담당 회원만, 총관리자는 전체 회원을 관리합니다.</p></div></div>
         <div class="stats">
-          <div><span class="small-label">전체 회원</span><strong id="stat-members">—</strong></div>
-          <div><span class="small-label">외부 계정 보유</span><strong id="stat-accounts">—</strong></div>
-          <div><span class="small-label">유효 동의</span><strong id="stat-consents">—</strong></div>
-          <div><span class="small-label">심사 대기 증빙</span><strong id="stat-evidence">—</strong></div>
+          <div><span class="small-label">관리 회원</span><strong id="stat-members">—</strong></div>
+          <div><span class="small-label">활동 중</span><strong id="stat-active">—</strong></div>
+          <div><span class="small-label">탈퇴</span><strong id="stat-withdrawn">—</strong></div>
+          <div><span class="small-label">심사 대기 서류</span><strong id="stat-evidence">—</strong></div>
         </div>
         <div class="content-layout"><div class="work">
-          <div class="section-title"><h2>전체 회원</h2><span class="muted">새 회원은 상담 직원에게 무작위로 배정됩니다</span></div>
+          <div class="section-title"><h2>회원 정보</h2><span class="muted">새 회원은 상담 직원에게 무작위로 배정됩니다</span></div>
           <div class="tablewrap">
             <table>
-              <thead><tr><th>회원(가명 ID)</th><th>출생연도</th><th>직업</th><th>담당 직원</th><th>유효 동의</th><th>외부 계정</th></tr></thead>
-              <tbody id="admin-members-body"></tbody>
+              <thead><tr><th>회원(가명 ID)</th><th>출생연도</th><th>직업</th><th>담당 직원</th><th>외부 계정</th><th>상태</th><th>관리</th></tr></thead>
+              <tbody id="manage-body"></tbody>
             </table>
-            <div class="empty" id="admin-members-empty" hidden>회원이 없습니다.</div>
+            <div class="empty" id="manage-empty" hidden>회원이 없습니다.</div>
           </div>
-
-          <div class="section-title"><h2>증빙 심사</h2><span class="muted">나에게 배정된 증빙만, 심사 중에만 열람</span></div>
-          <div class="tablewrap">
-            <table>
-              <thead><tr><th>파일 ID</th><th>회원(가명 ID)</th><th>접수</th><th>상태</th><th>삭제 기한</th><th>관리</th></tr></thead>
-              <tbody id="reviews-body"></tbody>
-            </table>
-            <div class="empty" id="reviews-empty" hidden>배정된 증빙이 없습니다.</div>
+          <div class="card mt16" id="edit-card" hidden>
+            <h3 id="edit-title">회원 정보 수정</h3>
+            <form class="form edit" id="edit-form">
+              <input type="hidden" name="member_id">
+              <label>출생연도<input type="number" name="birth_year" min="1900" max="2100" required></label>
+              <label>직업<input type="text" name="job" maxlength="40" required></label>
+              <div class="actions"><button type="submit" class="btn primary">저장</button><button type="button" class="btn" id="edit-cancel">취소</button></div>
+            </form>
           </div>
-          <p id="reviews-result" class="result" hidden></p>
+          <p id="manage-result" class="result" hidden></p>
 
-          <div class="section-title"><h2>전체 회원 내보내기</h2><span class="muted">POST /api/admin/member-exports</span></div>
-          <div class="card">
-            <div class="row-between">
-              <p class="muted">결과 파일은 서버 안에만 암호화해 보관하며 브라우저로 내려받지 않습니다. 외부 제공은 반출 신청과 별도 승인을 거쳐야 합니다.</p>
-              <button id="export-btn" type="button" class="btn primary">내보내기 실행</button>
+          <div data-roles="data_admin">
+            <div class="section-title"><h2>전체 회원 내보내기</h2><span class="muted">총관리자 전용 · POST /api/admin/member-exports</span></div>
+            <div class="card">
+              <div class="row-between">
+                <p class="muted">결과 파일은 서버 안에만 암호화해 보관하며 브라우저로 내려받지 않습니다. 외부 제공은 발송 신청과 별도 승인을 거쳐야 합니다.</p>
+                <button id="export-btn" type="button" class="btn primary">내보내기 실행</button>
+              </div>
+              <p id="export-result" class="result" hidden></p>
             </div>
-            <p id="export-result" class="result" hidden></p>
+            <div class="tablewrap">
+              <table>
+                <thead><tr><th>export_id</th><th>실행 직원</th><th>건수</th><th>중계 등록</th><th>실행 시각</th></tr></thead>
+                <tbody id="exports-body"></tbody>
+              </table>
+              <div class="empty" id="exports-empty" hidden>내보내기 내역이 없습니다.</div>
+            </div>
           </div>
-          <div class="tablewrap">
-            <table>
-              <thead><tr><th>export_id</th><th>실행 직원</th><th>건수</th><th>중계 등록</th><th>실행 시각</th></tr></thead>
-              <tbody id="exports-body"></tbody>
-            </table>
-            <div class="empty" id="exports-empty" hidden>내보내기 내역이 없습니다.</div>
-          </div>
-        </div><aside class="guide"><span class="eyebrow">STAFF GUIDE</span><h2>총관리자 업무</h2><ol><li><p>이름·연락처는 화면에 표시하지 않습니다. 필요한 항목만 확인하세요.</p></li><li><p>열람한 증빙은 저장하거나 외부로 옮기지 마세요. 원본은 기한이 지나면 자동 삭제됩니다.</p></li><li><p>상담 직원의 내보내기 내역이 보이면 즉시 확인하세요.</p></li><li><p>모든 조회·변경은 추적번호와 함께 감사 로그에 기록됩니다.</p></li></ol></aside></div>
+        </div><aside class="guide"><span class="eyebrow">STAFF GUIDE</span><h2>회원 관리</h2><ol><li><p>수정할 수 있는 항목은 출생연도·직업뿐이며, 이름·연락처는 화면에 나오지 않습니다.</p></li><li><p>탈퇴하면 이름·연락처가 지워지고, 이 회원이 주고받은 동의와 매칭이 모두 철회됩니다. 되돌릴 수 없습니다.</p></li><li><p>상담 직원의 내보내기 내역이 보이면 즉시 확인하세요(총관리자).</p></li><li><p>모든 조회·변경은 추적번호와 함께 감사 로그에 기록됩니다.</p></li></ol></aside></div>
       </section>
 
-      <!-- 조회·심사·승인 (approver) -->
-      <section class="view" data-view="approvals" data-title="조회·심사·승인" hidden>
-        <div class="page-heading"><div><span class="eyebrow">REVIEW &amp; APPROVAL</span><h1>조회 · 심사 · 승인</h1><p class="muted">반출 신청을 조회하고 내용을 확인한 뒤 승인 또는 거절합니다. 본인이 신청한 건은 처리할 수 없습니다.</p></div></div>
+      <!-- ③ 회원·서류 조회·심사·승인 (상담: 담당 회원 / 총관리자: 전체) -->
+      <section class="view" data-view="evidence" data-title="회원·서류 심사" hidden>
+        <div class="page-heading"><div><span class="eyebrow">DOCUMENT REVIEW</span><h1>회원 · 서류 조회 · 심사 · 승인</h1><p class="muted">회원이 제출한 증빙 서류를 열람하고 통과(승인) 또는 반려합니다. 상담 직원은 담당 회원의 서류만, 총관리자는 전체 서류를 심사합니다.</p></div></div>
         <div class="content-layout"><div class="work">
-          <div class="section-title"><h2>반출 신청 조회</h2>
+          <div class="section-title"><h2>제출 서류</h2>
+            <div class="filters" id="evidence-filters">
+              <button type="button" class="chip active" data-status="submitted,in_review">심사 대기</button>
+              <button type="button" class="chip" data-status="reviewed">심사 완료</button>
+              <button type="button" class="chip" data-status="">전체</button>
+            </div>
+          </div>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>서류 ID</th><th>회원(가명 ID)</th><th>접수</th><th>상태</th><th>심사자</th><th>삭제 기한</th><th>관리</th></tr></thead>
+              <tbody id="reviews-body"></tbody>
+            </table>
+            <div class="empty" id="reviews-empty" hidden>서류가 없습니다.</div>
+          </div>
+          <p id="reviews-result" class="result" hidden></p>
+        </div><aside class="guide"><span class="eyebrow">STAFF GUIDE</span><h2>서류 심사</h2><ol><li><p>심사 중인 서류만 열람할 수 있고, 처음 연 직원이 심사자로 기록됩니다.</p></li><li><p>열람한 서류를 저장하거나 외부로 옮기지 마세요.</p></li><li><p>원본은 심사 후 7일, 미심사 30일이 지나면 자동 삭제됩니다.</p></li><li><p>모든 조회·변경은 추적번호와 함께 감사 로그에 기록됩니다.</p></li></ol></aside></div>
+      </section>
+
+      <!-- ④ 소개 자료 발송 승인 (approver) -->
+      <section class="view" data-view="approvals" data-title="소개 자료 발송 승인" hidden>
+        <div class="page-heading"><div><span class="eyebrow">DELIVERY APPROVAL</span><h1>소개 자료 발송 승인</h1><p class="muted">매칭된 회원에게 보내는 소개 자료 발송 신청을 확인하고 승인 또는 거절합니다. 본인이 신청한 건은 처리할 수 없습니다.</p></div></div>
+        <div class="content-layout"><div class="work">
+          <div class="section-title"><h2>발송 신청</h2>
             <div class="filters" id="approval-filters">
               <button type="button" class="chip active" data-status="">전체</button>
               <button type="button" class="chip" data-status="pending">대기</button>
@@ -185,7 +219,7 @@
           </div>
           <div class="tablewrap">
             <table>
-              <thead><tr><th>신청 ID</th><th>신청자</th><th>수신자</th><th>목적</th><th>상태</th><th>반출 기한</th><th>관리</th></tr></thead>
+              <thead><tr><th>신청 ID</th><th>신청자</th><th>수신자</th><th>목적</th><th>상태</th><th>제공 기한</th><th>관리</th></tr></thead>
               <tbody id="approvals-body"></tbody>
             </table>
             <div class="empty" id="approvals-empty" hidden>신청 내역이 없습니다.</div>
@@ -194,7 +228,7 @@
           <div class="card mt16" id="request-detail" hidden>
             <div class="row-between"><h2 id="detail-title">신청 심사</h2><span id="detail-status"></span></div>
             <dl class="facts" id="detail-facts"></dl>
-            <h3>반출 파일 미리보기</h3>
+            <h3>소개 자료 미리보기</h3>
             <dl class="facts" id="detail-preview"></dl>
             <div class="actions mt16" id="detail-actions"></div>
           </div>

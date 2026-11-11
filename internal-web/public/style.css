@@ -149,3 +149,4 @@ details.sub[open] summary{margin-bottom:10px}
 tr.selected td{background:#eef3ff}
 @media(max-width:650px){.stats{grid-template-columns:1fr 1fr}.stats>div:nth-child(3){border-left:0}.facts{grid-template-columns:1fr}.row-between{flex-direction:column;align-items:flex-start}}
 .section-title+.card,.section-title+.two{margin-top:14px}
+.form.edit{grid-template-columns:1fr 2fr auto;align-items:end;gap:12px}.form.edit .actions{margin-top:0}.form.edit .btn{margin-top:0}@media(max-width:650px){.form.edit{grid-template-columns:1fr}}

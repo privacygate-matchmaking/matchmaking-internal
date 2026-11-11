@@ -22,16 +22,17 @@ Keycloak client: `internal-web`, `external-web` · 쿠키: `internal_session`, `
 ## 내부 (internal-api)
 | 메서드 | 경로 | 허용 역할 | 설명 |
 |---|---|---|---|
-| GET | /api/members | counselor | 담당 회원 목록 (허용 항목만) |
-| GET | /api/members/{member_id} | counselor | 담당 회원 상세. 담당이 아니면 404 |
+| GET | /api/members | counselor(담당 회원), data_admin(전체) | 회원 목록 (허용 항목·담당 직원·상태, 이름·연락처 제외) |
+| GET | /api/members/{member_id} | counselor(담당 회원), data_admin(전체) | 회원 상세(동의·매칭 현황). 범위 밖이면 404 |
 | POST | /api/admin/member-exports | data_admin | 전체 회원 내보내기 (공격 ① 대상). 결과 파일은 서버 내부에만 두고 `export_id`·건수만 응답 (내려받기 경로 없음) |
-| GET | /api/admin/members | data_admin (총관리자) | 전체 회원 목록 (가명 ID·출생연도·직업·담당 직원·유효 동의 수·외부 계정 여부, 이름·연락처 제외) ※명세 외 추가 |
+| PATCH | /api/members/{member_id} | counselor(담당 회원), data_admin(전체) | 회원 정보 수정 — 출생연도·직업만, 탈퇴 회원 불가 ※명세 외 추가 |
+| POST | /api/members/{member_id}/withdraw | counselor(담당 회원), data_admin(전체) | 탈퇴 처리 — 이름·연락처 삭제, 상태 withdrawn, 주고받은 동의 철회·매칭 취소 (행·기록은 유지) ※명세 외 추가 |
 | GET | /api/admin/member-exports | data_admin (총관리자) | 전체 회원 내보내기 내역 (실행 직원·건수·중계 등록 여부, 파일 내용 없음) ※명세 외 추가 |
 | POST | /api/member-exports/{export_id}/transfer-files | counselor (본인이 만든 내보내기만) | 내보내기 파일 바이트를 internal-api 가 중계 `POST /api/transfer-files` 에 multipart 로 등록 (공격 연결 단계) ※명세 외 추가 |
 | POST | /api/evidence-files | 서비스: transfer-api + 회원 토큰 | **회원** 증빙 제출 (multipart PDF, 최대 2MiB) → AES-GCM 암호화 후 evidence-storage. 201 `{file_id, status}` (직원은 제출 불가) |
-| GET | /api/evidence-files | data_admin | 나에게 배정된 증빙 목록 (file_id, 회원 가명 ID, 접수일, 상태, 삭제 기한, 원본 내용 없음) ※명세 외 추가 |
-| GET | /api/evidence-files/{file_id}/content | data_admin | 배정된 증빙만, 심사 중에만 열람 |
-| POST | /api/evidence-files/{file_id}/review | data_admin | 심사 결과 저장, 원본 삭제 기한 설정 |
+| GET | /api/evidence-files | counselor(담당 회원), data_admin(전체) | 증빙 목록 (file_id, 회원 가명 ID, 접수일, 상태, 심사자, 삭제 기한, 원본 내용 없음) ※명세 외 추가 |
+| GET | /api/evidence-files/{file_id}/content | counselor(담당 회원), data_admin(전체) | 심사 중에만 열람, 처음 연 직원이 심사자 |
+| POST | /api/evidence-files/{file_id}/review | counselor(담당 회원), data_admin(전체) | 심사 결과(통과·반려) 저장, 원본 삭제 기한 설정 |
 | POST | /api/internal/disclosure-checks | 서비스: transfer-api | 수신자-회원 관계·동의 확인 (결과만 응답) |
 | GET | /api/internal/my-evidence-files | 서비스: transfer-api + 회원 토큰 | 내 증빙 심사 상태 (원본·심사자 정보 없음) ※명세 외 추가 |
 | GET | /api/internal/my-consents | 서비스: transfer-api + 회원 토큰 | 내 동의 목록 ※명세 외 추가 |
@@ -82,9 +83,13 @@ external-api 에는 업무 DB·증빙 저장소 접근 권한이 없다.
 
 | 경로 | 입력 → 응답 |
 |---|---|
-| `GET /api/members` | → `{"items": [{member_id, pseudo_id, birth_year, job}]}` (담당 회원만) |
 | `GET /api/members/{member_id}` | → `{member_id, pseudo_id, birth_year, job, consents: [{consent_id, item, purpose, counterpart_pseudo_id, recipient_id, expires_at, revoked_at, valid}]}`. 담당 아니면 404 |
-| `GET /api/admin/members` | → `{"items": [{member_id, pseudo_id, birth_year, job, has_account, counselors, valid_consents, created_at}]}` |
+| `GET /api/members` | → `{"items": [{member_id, pseudo_id, birth_year, job, status, has_account, counselors, valid_consents, open_evidence, created_at}]}` (counselor: 담당 회원, data_admin: 전체) |
+| `PATCH /api/members/{member_id}` | `{birth_year?, job?}` → `{member_id, birth_year, job}` |
+| `POST /api/members/{member_id}/withdraw` | `{}` → `{member_id, status: "withdrawn", revoked_consents}` |
+| `GET /api/internal/my-matches` | → `{"items": [{counterpart_member_id, counterpart_pseudo_id, i_matched, they_matched, matched, matched_at}]}` (소개된 상대만) |
+| `POST /api/internal/my-matches` | `{counterpart_member_id}` → 201 `{counterpart_member_id, matched}`. 서로 누르면 양쪽 프로필 제공 동의(item=profile, purpose=introduction, 30일) 자동 생성 |
+| `POST /api/internal/my-matches/{counterpart_member_id}/cancel` | `{}` → `{counterpart_member_id, cancelled, revoked_consents}`. 매칭으로 만든 양쪽 동의 철회 |
 | `GET /api/admin/member-exports` | → `{"items": [{export_id, created_by, created_by_role, row_count, transfer_file_id, created_at}]}` (최근 50건) |
 | `POST /api/admin/member-exports` | `{}` → 201 `{export_id, row_count, created_at}` (파일은 evidence-storage/exports 에 암호문) |
 | `POST /api/member-exports/{export_id}/transfer-files` | `{}` → 중계 응답 그대로 (`{file_id, scan_status, export_banned, ...}`). 이미 등록했으면 409 |

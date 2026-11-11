@@ -7,6 +7,7 @@ const $ = (id) => document.getElementById(id);
 const ROLE_NAMES = { counselor: "상담", data_admin: "총관리자", approver: "승인" };
 const STATUS = {
   pending: ["대기", "amber"], approved: ["승인", "green"], rejected: ["거절", "red"], revoked: ["회수", "red"],
+  active: ["활동", "green"], withdrawn: ["탈퇴", ""],
   submitted: ["접수", ""], in_review: ["심사 중", "amber"], reviewed: ["심사 완료", "green"], deleted: ["삭제됨", ""],
   passed: ["통과", "green"], blocked: ["차단", "red"], failed: ["실패", "red"],
 };
@@ -119,12 +120,20 @@ function showApp() {
     if (visible && !first) first = btn.dataset.view;
     btn.onclick = () => selectView(btn.dataset.view);
   }
+  // 본문의 역할별 영역도 같은 규칙 (표시 편의일 뿐, 권한은 서버가 확인)
+  for (const node of document.querySelectorAll("main [data-roles]")) {
+    if (node.closest("#nav")) continue;
+    node.hidden = !node.dataset.roles.split(",").includes(role);
+  }
   if (first) selectView(first);
 }
 
+const isCounselor = () => state.me.role === "counselor";
+
 const LOADERS = {
-  members: async () => { await loadMembers(); await loadRequests(); },
-  admin: loadAdmin,
+  members: async () => { await loadMembers(); if (isCounselor()) await loadRequests(); },
+  manage: loadManage,
+  evidence: loadReviews,
   approvals: loadApprovals,
 };
 
@@ -138,13 +147,16 @@ function selectView(name) {
   if (LOADERS[name]) LOADERS[name]().catch((e) => console.warn(e.message));
 }
 
-// ---- 담당 회원 (counselor) ----
+// ---- ① 담당 회원 조회 ----
+function memberStatus(m) { return pill(m.status || "active"); }
+
 async function loadMembers() {
   const { items } = await getJson("/api/members");
   state.members = items;
   $("members-count").textContent = `${items.length}명`;
   fill("members-body", "members-empty", items.map((m) =>
-    row([m.pseudo_id, m.birth_year, m.job, actions(button("동의 보기", () => showMember(m.member_id)))])));
+    row([m.pseudo_id, m.birth_year, m.job, m.counselors || "미배정", m.valid_consents, memberStatus(m),
+         actions(button("상세", () => showMember(m.member_id)))])));
 }
 
 async function showMember(memberId) {
@@ -153,12 +165,22 @@ async function showMember(memberId) {
   if (!res.ok) { box.hidden = true; return alertInline($("members-empty"), await describe(res)); }
   const m = await res.json();
   state.consents[m.member_id] = m.consents;
-  $("member-detail-title").textContent = `${m.pseudo_id} · ${m.birth_year} · ${m.job}`;
-  fill("consents-body", "consents-empty", m.consents.map((c) =>
-    row([c.counterpart_pseudo_id, c.item, c.purpose, toKst(c.expires_at),
-         pill(c.revoked_at ? "revoked" : c.valid ? "approved" : "rejected"),
-         c.valid ? actions(button("이 동의로 신청", () => prefillRequest(m.member_id, c.consent_id))) : "-"])));
+  $("member-detail-title").textContent = `${m.pseudo_id} · ${m.birth_year ?? "-"} · ${m.job ?? "-"}`;
+  $("member-detail-status").replaceChildren(pill(m.status));
+  const yes = (v) => el("span", v ? "매칭함" : "-", v ? "pill" : "muted");
+  fill("matches-body", "matches-empty", m.matches.map((x) =>
+    row([x.counterpart_pseudo_id, yes(x.i_matched), yes(x.they_matched),
+         x.matched ? el("span", "매칭 성사", "pill green") : el("span", "대기", "muted")])));
+  const counselor = isCounselor();
+  fill("consents-body", "consents-empty", m.consents.map((c) => {
+    const cells = [c.counterpart_pseudo_id, c.item, c.purpose, toKst(c.expires_at),
+                   pill(c.revoked_at ? "revoked" : c.valid ? "approved" : "rejected")];
+    if (counselor) cells.push(c.valid && m.status === "active"
+      ? actions(button("이 상대에게 발송", () => prefillRequest(m.member_id, c.consent_id))) : "-");
+    return row(cells);
+  }));
   box.hidden = false;
+  box.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 function alertInline(node, text) { node.textContent = text; node.hidden = false; }
@@ -170,7 +192,7 @@ async function loadRequests() {
   }
   const sel = $("req-member");
   const keep = sel.value;
-  sel.replaceChildren(el("option", "회원 선택"), ...state.members.map((m) => {
+  sel.replaceChildren(el("option", "회원 선택"), ...state.members.filter((m) => m.status !== "withdrawn").map((m) => {
     const o = el("option", `${m.pseudo_id} (${m.job})`); o.value = m.member_id; return o;
   }));
   sel.firstChild.value = "";
@@ -242,7 +264,7 @@ async function createRequest(ev) {
   });
   if (!res.ok) return showResult(out, await describe(res), false);
   const r = await res.json();
-  showResult(out, `신청 완료 · ${r.request_id} (승인 대기)`, true);
+  showResult(out, `발송 신청 완료 · ${r.request_id} (승인 대기)`, true);
   loadRequests();
 }
 
@@ -257,32 +279,89 @@ async function registerExport(ev) {
     (f.export_banned ? " · 반출 금지" : ""), f.scan_status === "passed" && !f.export_banned);
 }
 
-// ---- 회원 관리 (data_admin = 총관리자) ----
-async function loadAdmin() {
-  const [members, exportsList] = await Promise.all([getJson("/api/admin/members"), getJson("/api/admin/member-exports")]);
-  const m = members.items;
-  $("stat-members").textContent = m.length;
-  $("stat-accounts").textContent = m.filter((x) => x.has_account).length;
-  $("stat-consents").textContent = m.reduce((n, x) => n + x.valid_consents, 0);
-  fill("admin-members-body", "admin-members-empty", m.map((x) =>
-    row([x.pseudo_id, x.birth_year, x.job, x.counselors || "미배정", x.valid_consents, x.has_account ? "있음" : "-"])));
-  fill("exports-body", "exports-empty", exportsList.items.map((x) =>
+// ---- ② 회원 관리 (정보 수정·탈퇴) ----
+async function loadManage() {
+  const { items } = await getJson("/api/members");
+  state.members = items;
+  $("stat-members").textContent = items.length;
+  $("stat-active").textContent = items.filter((m) => m.status === "active").length;
+  $("stat-withdrawn").textContent = items.filter((m) => m.status === "withdrawn").length;
+  $("stat-evidence").textContent = items.reduce((n, m) => n + (m.open_evidence || 0), 0);
+  fill("manage-body", "manage-empty", items.map((m) => {
+    const active = m.status === "active";
+    return row([m.pseudo_id, m.birth_year ?? "-", m.job ?? "-", m.counselors || "미배정",
+                m.has_account ? "있음" : "-", memberStatus(m),
+                active ? actions(button("수정", () => openEdit(m)),
+                                 button("탈퇴", () => withdraw(m), "btn sm danger")) : "-"]);
+  }));
+  if (state.me.role === "data_admin") await loadExports();
+}
+
+function openEdit(m) {
+  const f = $("edit-form").elements;
+  f.member_id.value = m.member_id;
+  f.birth_year.value = m.birth_year ?? "";
+  f.job.value = m.job ?? "";
+  $("edit-title").textContent = `회원 정보 수정 · ${m.pseudo_id}`;
+  $("edit-card").hidden = false;
+  $("edit-card").scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+async function saveEdit(ev) {
+  ev.preventDefault();
+  const f = ev.target.elements;
+  const res = await api(`/api/members/${encodeURIComponent(f.member_id.value)}`, {
+    method: "PATCH", json: { birth_year: Number(f.birth_year.value), job: f.job.value.trim() } });
+  showResult($("manage-result"), res.ok ? "회원 정보를 수정했습니다." : await describe(res), res.ok);
+  if (res.ok) { $("edit-card").hidden = true; loadManage(); }
+}
+
+async function withdraw(m) {
+  // confirm() 대화상자 대신 같은 버튼을 한 번 더 누르게 한다 (실수 방지)
+  if (state.pendingWithdraw !== m.member_id) {
+    state.pendingWithdraw = m.member_id;
+    showResult($("manage-result"), `${m.pseudo_id} 탈퇴: 이름·연락처 삭제, 동의·매칭 철회. 되돌릴 수 없습니다. 진행하려면 '탈퇴'를 한 번 더 누르세요.`, false);
+    return;
+  }
+  state.pendingWithdraw = null;
+  const res = await api(`/api/members/${m.member_id}/withdraw`, { method: "POST", json: {} });
+  if (!res.ok) return showResult($("manage-result"), await describe(res), false);
+  const r = await res.json();
+  showResult($("manage-result"), `${m.pseudo_id} 탈퇴 처리 완료 · 철회된 동의 ${r.revoked_consents}건`, true);
+  loadManage();
+}
+
+async function loadExports() {
+  const { items } = await getJson("/api/admin/member-exports");
+  fill("exports-body", "exports-empty", items.map((x) =>
     row([mono(short(x.export_id)),
          x.created_by_role === "data_admin" ? x.created_by : el("span", `${x.created_by} (${ROLE_NAMES[x.created_by_role] || x.created_by_role})`, "pill red"),
          x.row_count, x.transfer_file_id ? mono(short(x.transfer_file_id)) : "-", toKst(x.created_at)])));
-  await loadReviews();
 }
 
-// ---- 증빙 심사 (data_admin) ----
+async function runExport() {
+  const res = await api("/api/admin/member-exports", { method: "POST" });
+  if (!res.ok) return showResult($("export-result"), await describe(res), false);
+  const x = await res.json();
+  showResult($("export-result"), `내보내기 완료 · export_id ${x.export_id} · ${x.row_count}건 · ${toKst(x.created_at)}`, true);
+  loadExports().catch(() => {});
+}
+
+// ---- ③ 회원·서류 조회·심사·승인 ----
 async function loadReviews() {
-  const { items } = await getJson("/api/evidence-files");
-  $("stat-evidence").textContent = items.filter((e) => ["submitted", "in_review"].includes(e.status)).length;
+  state.evidence = (await getJson("/api/evidence-files")).items;
+  renderReviews();
+}
+
+function renderReviews() {
+  const want = state.evFilter ? state.evFilter.split(",") : null;
+  const items = state.evidence.filter((e) => !want || want.includes(e.status));
   fill("reviews-body", "reviews-empty", items.map((e) => {
     const open = ["submitted", "in_review"].includes(e.status);
     const status = e.status === "reviewed" && e.review_result
       ? el("span", e.review_result === "passed" ? "통과" : "반려", `pill ${e.review_result === "passed" ? "green" : "red"}`)
       : pill(e.status);
-    return row([mono(short(e.file_id)), e.member_pseudo_id, toKst(e.created_at), status,
+    return row([mono(short(e.file_id)), e.member_pseudo_id, toKst(e.created_at), status, e.reviewer || "-",
       toKst(e.delete_after) + (e.legal_hold ? " (보존)" : ""),
       open ? actions(button("열람", () => openEvidence(e.file_id)),
                      button("통과", () => review(e.file_id, "passed")),
@@ -307,15 +386,6 @@ async function review(id, result) {
   const res = await api(`/api/evidence-files/${id}/review`, { method: "POST", json: { result } });
   showResult($("reviews-result"), res.ok ? `심사 완료 (${result === "passed" ? "통과" : "반려"})` : await describe(res), res.ok);
   loadReviews();
-}
-
-// ---- 전체 회원 내보내기 (data_admin) ----
-async function runExport() {
-  const res = await api("/api/admin/member-exports", { method: "POST" });
-  if (!res.ok) return showResult($("export-result"), await describe(res), false);
-  const x = await res.json();
-  showResult($("export-result"), `내보내기 완료 · export_id ${x.export_id} · ${x.row_count}건 · ${toKst(x.created_at)}`, true);
-  loadAdmin().catch(() => {});
 }
 
 // ---- 조회·심사·승인 (approver) ----
@@ -414,6 +484,15 @@ async function init() {
   $("revoke-form").onsubmit = (ev) => { ev.preventDefault(); revoke($("revoke-id").value.trim()); };
   $("req-member").onchange = (ev) => fillConsents(ev.target.value);
   $("req-consent").onchange = syncPurpose;
+  $("edit-form").onsubmit = saveEdit;
+  $("edit-cancel").onclick = () => { $("edit-card").hidden = true; };
+  for (const chip of $("evidence-filters").querySelectorAll(".chip")) {
+    chip.onclick = () => {
+      state.evFilter = chip.dataset.status;
+      for (const c of $("evidence-filters").querySelectorAll(".chip")) c.classList.toggle("active", c === chip);
+      renderReviews();
+    };
+  }
   for (const chip of $("approval-filters").querySelectorAll(".chip")) {
     chip.onclick = () => {
       state.filter = chip.dataset.status;
