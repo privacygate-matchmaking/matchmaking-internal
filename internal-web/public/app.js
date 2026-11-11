@@ -93,6 +93,7 @@ function mono(text) { const s = el("span", text, "mono"); s.title = text || ""; 
 function showLogin() {
   $("login-view").hidden = false;
   $("app-view").hidden = true;
+  $("account").hidden = true;
   if (new URLSearchParams(location.search).get("login") === "failed") {
     $("login-msg").textContent = "로그인하지 못했습니다. 직원 계정인지 확인하세요.";
     $("login-msg").hidden = false;
@@ -104,6 +105,7 @@ function showApp() {
   const roleName = ROLE_NAMES[role] || role;
   $("login-view").hidden = true;
   $("app-view").hidden = false;
+  $("account").hidden = false;
   $("user-label").textContent = `${pseudo_id} · ${roleName}`;
   $("avatar").textContent = roleName.charAt(0);
   $("side-user").textContent = pseudo_id;
@@ -132,7 +134,7 @@ function selectView(name) {
   for (const view of document.querySelectorAll(".view")) {
     const on = view.dataset.view === name;
     view.hidden = !on;
-    if (on) $("crumb").textContent = `PrivacyGate　/　${view.dataset.title}`;
+    if (on) $("crumb").textContent = `이음 내부 업무 · ${view.dataset.title}`;
   }
   if (LOADERS[name]) LOADERS[name]().catch((e) => console.warn(e.message));
 }
