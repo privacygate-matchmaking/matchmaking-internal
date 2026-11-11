@@ -19,7 +19,7 @@ from privacygate.errors import ErrorCode, GateError
 from privacygate.policy import STAFF_ROLES, Principal, Role
 from pydantic import BaseModel, Field
 
-from .. import audit, db, jobs, storage, transfer_client
+from .. import audit, db, jobs, notify, storage, transfer_client
 from ..auth.session import member_via_transfer, require, require_csrf, require_service
 from ..config import get_settings
 
@@ -234,6 +234,17 @@ def withdraw_member(member_id: uuid.UUID, body: WithdrawIn, request: Request,
                           withdraw_requested_by = %s, withdraw_reason = %s
                     WHERE member_id = %s RETURNING withdraw_at""",
                 (WITHDRAW_GRACE_DAYS, principal.user_id, reason, member_id)).fetchone()
+            who = f"{m['pseudo_id']} {m['name']}"
+            text = f"{who} 회원이 탈퇴 예정이 되었습니다 (7일 후 삭제){' · 사유: ' + reason if reason else ''}"
+            if principal.role == Role.DATA_ADMIN.value:      # 총관리자 요청 → 담당 상담 직원에게
+                notify.to_counselors_of(conn, member_id, "withdraw_requested", "총관리자가 탈퇴 요청함", text, "manage")
+            else:                                             # 상담 직원 요청 → 총관리자에게
+                notify.to_role(conn, "data_admin", "withdraw_requested", f"탈퇴 요청 ({principal.pseudo_id})", text, "manage")
+        else:
+            # 즉시 삭제 전에 담당 직원에게 알림 (삭제 뒤에는 담당 관계도 지워짐)
+            notify.to_counselors_of(conn, member_id, "member_deleted", "회원 즉시 탈퇴",
+                                    f"{m['pseudo_id']} {m['name']} 회원 정보가 총관리자에 의해 삭제되었습니다.",
+                                    "manage", exclude=principal.user_id)
     if body.mode == "scheduled":
         audit.allow(request, target_type="member_withdraw_scheduled", target_id=m["pseudo_id"])
         return {"member_id": str(member_id), "status": "withdraw_pending", "withdraw_at": _iso(row["withdraw_at"])}
@@ -256,6 +267,9 @@ def cancel_withdraw(member_id: uuid.UUID, request: Request,
         conn.execute("""UPDATE members SET status = 'active', withdraw_requested_at = NULL, withdraw_at = NULL,
                                withdraw_requested_by = NULL, withdraw_reason = NULL
                          WHERE member_id = %s""", (member_id,))
+        text = f"{m['pseudo_id']} {m['name']} 회원의 탈퇴가 철회되었습니다 ({principal.pseudo_id})."
+        notify.to_counselors_of(conn, member_id, "withdraw_cancelled", "탈퇴 철회", text, "manage", exclude=principal.user_id)
+        notify.to_role(conn, "data_admin", "withdraw_cancelled", "탈퇴 철회", text, "manage", exclude=principal.user_id)
     audit.allow(request, target_type="member_withdraw_cancelled", target_id=m["pseudo_id"])
     return {"member_id": str(member_id), "status": "active"}
 
@@ -336,6 +350,8 @@ def request_introduction(member_id: uuid.UUID, body: IntroductionIn, request: Re
         conn.execute("""INSERT INTO intro_files (label, member_id, seq, consent_id, file_id, request_id, created_by)
                         VALUES (%s, %s, %s, %s, %s, %s, %s)""",
                      (label, member_id, seq, c["consent_id"], file_id, request_id, principal.user_id))
+        notify.to_role(conn, "approver", "intro_requested", "새 소개 자료 발송 신청",
+                       f"{label} ({m['pseudo_id']} {m['name']}) · 신청 {principal.pseudo_id}", "approvals")
     audit.allow(request, target_type="export_request", target_id=request_id)
     return {**req.json(), "label": label, "file_id": file_id, "profile": profile}
 
@@ -369,6 +385,12 @@ def create_member_export(request: Request,
             """INSERT INTO member_exports (export_id, created_by, row_count, storage_key, file_hash)
                VALUES (%s, %s, %s, %s, %s) RETURNING created_at""",
             (export_id, principal.user_id, len(rows), key, storage.sha256_hex(data))).fetchone()
+        # 전체 내보내기는 모든 총관리자에게 알림 (상담 직원이 실행했다면 이상 행위)
+        odd = principal.role != Role.DATA_ADMIN.value
+        notify.to_role(conn, "data_admin", "member_export",
+                       "⚠ 비정상 전체 회원 내보내기" if odd else "전체 회원 내보내기 실행",
+                       f"{principal.pseudo_id}({principal.role}) · {len(rows)}건", "manage",
+                       exclude=None if odd else principal.user_id)
     audit.allow(request, target_type="member_export", target_id=str(export_id))
     return {"export_id": str(export_id), "row_count": len(rows), "created_at": _iso(row["created_at"])}
 
@@ -443,6 +465,10 @@ async def submit_evidence(request: Request, file: UploadFile = File(...),
                VALUES (%s, %s, %s, %s, %s, %s, %s, 'submitted', %s) RETURNING created_at""",
             (file_id, owner["member_id"], member.user_id, kind, key, storage.key_id(),
              storage.sha256_hex(data), _now() + timedelta(days=s.evidence_unreviewed_days))).fetchone()
+        kind_ko = "재직" if kind == "employment" else "학력"
+        text = f"{notify.member_label(conn, owner['member_id'])} 회원이 {kind_ko} 증빙을 제출했습니다."
+        notify.to_counselors_of(conn, owner["member_id"], "evidence_submitted", "새 증빙 서류", text, "evidence")
+        notify.to_role(conn, "data_admin", "evidence_submitted", "새 증빙 서류", text, "evidence")
     audit.allow(request, target_type="evidence", target_id=str(file_id))
     return {"file_id": str(file_id), "kind": kind, "status": "submitted", "created_at": _iso(row["created_at"])}
 
@@ -747,6 +773,9 @@ def create_match(body: MatchIn, request: Request, member: Principal = Depends(me
         if matched:
             _grant_match_consent(conn, me_id, other)
             _grant_match_consent(conn, other, me_id)
+            text = f"{notify.member_label(conn, me_id)} ↔ {notify.member_label(conn, other)} 매칭 성사 · 소개 자료 발송을 요청할 수 있습니다."
+            notify.to_counselors_of(conn, me_id, "match_made", "매칭 성사", text, "members")
+            notify.to_counselors_of(conn, other, "match_made", "매칭 성사", text, "members")
     audit.allow(request, target_type="match", target_id=str(other))
     return {"counterpart_member_id": str(other), "matched": matched}
 
@@ -771,3 +800,63 @@ def cancel_match(counterpart_member_id: uuid.UUID, request: Request,
             (MATCH_CONSENT_ITEM, MATCH_CONSENT_PURPOSE, me_id, other, other, me_id)).rowcount
     audit.allow(request, target_type="match", target_id=str(other))
     return {"counterpart_member_id": str(other), "cancelled": True, "revoked_consents": revoked}
+
+
+# ======================================================================
+# 직원 알림 (본인 알림만)
+# ======================================================================
+@router.get("/notifications")
+def list_notifications(request: Request, principal: Principal = Depends(require(*STAFF_ROLES))):
+    """내 알림 최근 100건과 읽지 않은 개수. ※ 명세 외 추가"""
+    with db.connection() as conn:
+        rows = conn.execute("""SELECT notification_id, kind, title, body, link_view, created_at, read_at
+                                 FROM notifications WHERE user_id = %s ORDER BY created_at DESC LIMIT 100""",
+                            (principal.user_id,)).fetchall()
+        unread = conn.execute("SELECT count(*) AS n FROM notifications WHERE user_id = %s AND read_at IS NULL",
+                              (principal.user_id,)).fetchone()["n"]
+    return {"unread": unread,
+            "items": [{"notification_id": str(r["notification_id"]), "kind": r["kind"], "title": r["title"],
+                       "body": r["body"], "link_view": r["link_view"], "created_at": _iso(r["created_at"]),
+                       "read": r["read_at"] is not None} for r in rows]}
+
+
+class NotificationSelect(BaseModel):
+    ids: list[uuid.UUID] = Field(default_factory=list, max_length=200)
+    all: bool = False
+
+
+def _unread(conn, user_id) -> int:
+    return conn.execute("SELECT count(*) AS n FROM notifications WHERE user_id = %s AND read_at IS NULL",
+                        (user_id,)).fetchone()["n"]
+
+
+@router.post("/notifications/read")
+def read_notifications(body: NotificationSelect, request: Request,
+                       principal: Principal = Depends(require(*STAFF_ROLES)),
+                       _csrf: None = Depends(require_csrf)):
+    """선택(ids) 또는 모두(all) 읽음 처리. 본인 알림만. ※ 명세 외 추가"""
+    with db.connection() as conn:
+        if body.all:
+            n = conn.execute("UPDATE notifications SET read_at = now() WHERE user_id = %s AND read_at IS NULL",
+                             (principal.user_id,)).rowcount
+        else:
+            n = conn.execute("""UPDATE notifications SET read_at = now()
+                                 WHERE user_id = %s AND read_at IS NULL AND notification_id = ANY(%s)""",
+                             (principal.user_id, [str(i) for i in body.ids])).rowcount
+        unread = _unread(conn, principal.user_id)
+    return {"updated": n, "unread": unread}
+
+
+@router.post("/notifications/delete")
+def delete_notifications(body: NotificationSelect, request: Request,
+                         principal: Principal = Depends(require(*STAFF_ROLES)),
+                         _csrf: None = Depends(require_csrf)):
+    """선택(ids) 또는 모두(all) 삭제. 본인 알림만. ※ 명세 외 추가"""
+    with db.connection() as conn:
+        if body.all:
+            n = conn.execute("DELETE FROM notifications WHERE user_id = %s", (principal.user_id,)).rowcount
+        else:
+            n = conn.execute("DELETE FROM notifications WHERE user_id = %s AND notification_id = ANY(%s)",
+                             (principal.user_id, [str(i) for i in body.ids])).rowcount
+        unread = _unread(conn, principal.user_id)
+    return {"deleted": n, "unread": unread}

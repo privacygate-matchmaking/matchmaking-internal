@@ -128,6 +128,7 @@ function showApp() {
     node.hidden = !node.dataset.roles.split(",").includes(role);
   }
   if (first) selectView(first);
+  initNotifications();
 }
 
 const isCounselor = () => state.me.role === "counselor";
@@ -570,6 +571,119 @@ async function revoke(label, approvalId) {
     : await api(`/api/approvals/${encodeURIComponent(approvalId)}/revoke`, { method: "POST", json: {} });
   showResult($("approvals-result"), res.ok ? `회수 완료 (${label || short(approvalId)}) · 받는 회원은 더 이상 내려받을 수 없습니다` : await describe(res), res.ok);
   loadApprovals();
+}
+
+// ---- 알림 (오른쪽 위 종) ----
+const notif = { items: [], selected: new Set(), timer: null };
+const KIND_ICON = { evidence_submitted: "📄", match_made: "💞", intro_requested: "📨", intro_decided: "✅",
+  withdraw_requested: "⏳", withdraw_cancelled: "↩", member_deleted: "🗑", member_export: "⚠", member_assigned: "👤" };
+
+function timeAgo(iso) {
+  const sec = Math.max(0, (Date.now() - new Date(iso)) / 1000);
+  if (sec < 60) return "방금";
+  if (sec < 3600) return `${Math.floor(sec / 60)}분 전`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)}시간 전`;
+  return toKst(iso);
+}
+
+function setBadge(n) {
+  const b = $("bell-badge");
+  b.textContent = n > 99 ? "99+" : String(n);
+  b.hidden = n <= 0;
+  $("bell").setAttribute("aria-label", n > 0 ? `알림 ${n}개 읽지 않음` : "알림");
+}
+
+async function loadNotifications() {
+  const res = await api("/api/notifications");
+  if (!res.ok) return;
+  const data = await res.json();
+  notif.items = data.items;
+  for (const id of [...notif.selected]) if (!data.items.some((x) => x.notification_id === id)) notif.selected.delete(id);
+  setBadge(data.unread);
+  renderNotifications();
+}
+
+function renderNotifications() {
+  const list = $("notif-list");
+  $("notif-empty").hidden = notif.items.length > 0;
+  const unread = notif.items.filter((x) => !x.read).length;
+  $("notif-summary").textContent = notif.items.length ? `읽지 않음 ${unread} · 전체 ${notif.items.length}` : "";
+  list.replaceChildren(...notif.items.map((x) => {
+    const li = el("li", null, `notif-item${x.read ? "" : " unread"}`);
+    const cb = el("input"); cb.type = "checkbox"; cb.checked = notif.selected.has(x.notification_id);
+    cb.setAttribute("aria-label", "선택");
+    cb.onchange = () => { cb.checked ? notif.selected.add(x.notification_id) : notif.selected.delete(x.notification_id); syncNotifTools(); };
+    const main = el("button", null, "notif-main"); main.type = "button";
+    main.append(el("span", KIND_ICON[x.kind] || "🔔", "notif-icon"));
+    const txt = el("span", null, "notif-text");
+    txt.append(el("strong", x.title), el("span", x.body || "", "notif-body"), el("span", timeAgo(x.created_at), "notif-time"));
+    main.append(txt);
+    main.onclick = async () => {                       // 누르면 읽음 + 해당 화면으로
+      if (!x.read) await markNotifications([x.notification_id]);
+      if (x.link_view && document.querySelector(`#nav button[data-view="${x.link_view}"]:not([hidden])`)) {
+        toggleNotifPanel(false);
+        selectView(x.link_view);
+      }
+    };
+    const ops = el("span", null, "notif-ops");
+    if (!x.read) ops.append(button("읽음", () => markNotifications([x.notification_id]), "text-button"));
+    ops.append(button("삭제", () => deleteNotifications([x.notification_id]), "text-button danger-text"));
+    li.append(cb, main, ops);
+    return li;
+  }));
+  syncNotifTools();
+}
+
+function syncNotifTools() {
+  const n = notif.selected.size;
+  $("notif-read-sel").disabled = n === 0;
+  $("notif-delete-sel").disabled = n === 0;
+  $("notif-read-sel").textContent = n ? `선택 읽음 (${n})` : "선택 읽음";
+  $("notif-delete-sel").textContent = n ? `선택 삭제 (${n})` : "선택 삭제";
+  const all = $("notif-select-all");
+  all.checked = notif.items.length > 0 && n === notif.items.length;
+  all.indeterminate = n > 0 && n < notif.items.length;
+}
+
+async function markNotifications(ids, all = false) {
+  const res = await api("/api/notifications/read", { method: "POST", json: { ids, all } });
+  if (res.ok) await loadNotifications();
+}
+
+async function deleteNotifications(ids, all = false) {
+  const res = await api("/api/notifications/delete", { method: "POST", json: { ids, all } });
+  if (res.ok) { ids.forEach((i) => notif.selected.delete(i)); if (all) notif.selected.clear(); await loadNotifications(); }
+}
+
+function toggleNotifPanel(open) {
+  const p = $("notif-panel");
+  const show = open ?? p.hidden;
+  p.hidden = !show;
+  $("bell").setAttribute("aria-expanded", String(show));
+  if (show) loadNotifications();
+}
+
+function initNotifications() {
+  $("bell").onclick = (e) => { e.stopPropagation(); toggleNotifPanel(); };
+  $("notif-panel").onclick = (e) => e.stopPropagation();
+  document.addEventListener("click", () => { if (!$("notif-panel").hidden && !$("confirm-dialog").open) toggleNotifPanel(false); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("notif-panel").hidden) toggleNotifPanel(false); });
+  $("notif-read-all").onclick = () => markNotifications([], true);
+  $("notif-delete-all").onclick = async () => {
+    if (!notif.items.length) return;
+    const ok = await ask("알림 모두 삭제", `알림 ${notif.items.length}개를 모두 삭제할까요?`, [
+      { label: "확인", value: "yes", cls: "danger" }, { label: "취소", value: null }], "NOTIFICATIONS");
+    if (ok === "yes") deleteNotifications([], true);
+  };
+  $("notif-read-sel").onclick = () => markNotifications([...notif.selected]);
+  $("notif-delete-sel").onclick = () => deleteNotifications([...notif.selected]);
+  $("notif-select-all").onchange = (e) => {
+    notif.selected = new Set(e.target.checked ? notif.items.map((x) => x.notification_id) : []);
+    renderNotifications();
+  };
+  loadNotifications();
+  clearInterval(notif.timer);
+  notif.timer = setInterval(() => { if (!document.hidden) loadNotifications(); }, 30000);   // 30초마다 확인
 }
 
 async function logout() {

@@ -48,6 +48,9 @@ EXPECTED = {
     ("POST", "/api/export-requests/{request_id}/reject"): "roles:approver",
     ("POST", "/api/approvals/{approval_id}/revoke"): "roles:approver",
     ("POST", "/api/approvals/revoke-by-label"): "roles:approver",   # 소개 자료 이름으로 회수 (명세 외 추가)
+    ("GET", "/api/notifications"): "roles:approver,counselor,data_admin",          # 직원 알림 (명세 외 추가)
+    ("POST", "/api/notifications/read"): "roles:approver,counselor,data_admin",
+    ("POST", "/api/notifications/delete"): "roles:approver,counselor,data_admin",
 }
 
 

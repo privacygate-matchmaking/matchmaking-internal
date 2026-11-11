@@ -135,3 +135,6 @@ external-api 에는 업무 DB·증빙 저장소 접근 권한이 없다.
 판단 근거(reason)는 응답에 넣지 않고 감사 로그에만 남긴다.
 | `POST /api/approvals/revoke-by-label` | `{"label": "A-001_file1"}` → 중계 회수 응답 그대로. 이름 → approval_id 는 내부 `intro_files` 에서 찾음 ※명세 외 추가 |
 | `GET /api/export-requests`, `/{request_id}` (내부 전달) | 중계 응답에 화면용 필드 추가: `label`, `consent_label`(C-n), `requester_pseudo_id`·`member_pseudo_id`·`recipient_pseudo_id`, 알고 있으면 `approval_id` |
+| `GET /api/notifications` | 직원 전체 → `{"unread", "items": [{notification_id, kind, title, body, link_view, created_at, read}]}` (본인 알림 최근 100건) ※명세 외 추가 |
+| `POST /api/notifications/read` | `{"ids": [...]}` 또는 `{"all": true}` → `{updated, unread}` (본인 알림만) |
+| `POST /api/notifications/delete` | `{"ids": [...]}` 또는 `{"all": true}` → `{deleted, unread}` (본인 알림만) |

@@ -7,7 +7,7 @@ import logging
 import threading
 import uuid
 
-from . import audit, db, storage
+from . import audit, db, notify, storage
 from .config import get_settings
 
 _log = logging.getLogger("internal-api.jobs")
@@ -65,6 +65,10 @@ def purge_due_members() -> int:
     for row in rows:
         trace = uuid.uuid4().hex
         try:
+            with db.connection() as conn:
+                text = f"{notify.member_label(conn, row['member_id'])} 회원의 탈퇴 유예가 끝나 회원 정보를 삭제했습니다."
+                notify.to_counselors_of(conn, row["member_id"], "member_deleted", "탈퇴 확정", text, "manage")
+                notify.to_role(conn, "data_admin", "member_deleted", "탈퇴 확정", text, "manage")
             purge_member(row["member_id"])
             audit.writer().record(trace_id=trace, action="member_purge", result="allow", actor="system",
                                   target_type="member", target_id=row["pseudo_id"])

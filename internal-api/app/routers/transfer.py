@@ -13,7 +13,7 @@ from privacygate.errors import ErrorCode, GateError
 from privacygate.policy import Principal, Role
 from pydantic import BaseModel, Field
 
-from .. import audit, db, transfer_client
+from .. import audit, db, notify, transfer_client
 from ..auth.session import require, require_csrf
 
 router = APIRouter(prefix="/api", tags=["transfer"])
@@ -135,6 +135,17 @@ def _with_pseudo_ids(items: list[dict]) -> None:
                     it[k.replace("_id", "_name")] = r["name"]
 
 
+def _notify_requester(request_id=None, label=None, title="", verb="") -> None:
+    """발송 신청한 상담 직원에게 결과 알림 (내부 기록 intro_files 로 신청자 확인)."""
+    with db.connection() as conn:
+        row = conn.execute("""SELECT f.label, f.created_by FROM intro_files f
+                               WHERE f.request_id::text = %s OR f.label = %s""",
+                           (str(request_id) if request_id else "", label or "")).fetchone()
+        if row:
+            notify.to_users(conn, [row["created_by"]], "intro_decided", title,
+                            f"{row['label']} 소개 자료 발송이 {verb}되었습니다.", "members")
+
+
 def _decide(request: Request, path: str, target: str):
     resp = transfer_client.call(request, "POST", path, json={})
     (audit.allow(request, target_type="export_request", target_id=target) if resp.status_code < 400
@@ -155,6 +166,7 @@ def approve_export_request(request_id: uuid.UUID, request: Request,
             with db.connection() as conn:
                 conn.execute("UPDATE intro_files SET approval_id = %s WHERE request_id = %s",
                              (approval_id, request_id))
+        _notify_requester(request_id=request_id, title="발송 승인", verb="승인")
         audit.allow(request, target_type="export_request", target_id=str(request_id))
     else:
         audit.deny(request, f"transfer_status_{resp.status_code}")
@@ -165,7 +177,10 @@ def approve_export_request(request_id: uuid.UUID, request: Request,
 def reject_export_request(request_id: uuid.UUID, request: Request,
                           principal: Principal = Depends(require(Role.APPROVER)),
                           _csrf: None = Depends(require_csrf)):
-    return _decide(request, f"/api/export-requests/{request_id}/reject", str(request_id))
+    resp = _decide(request, f"/api/export-requests/{request_id}/reject", str(request_id))
+    if resp.status_code < 400:
+        _notify_requester(request_id=request_id, title="발송 거절", verb="거절")
+    return resp
 
 
 @router.post("/approvals/{approval_id}/revoke")
@@ -188,4 +203,7 @@ def revoke_by_label(body: RevokeByLabelIn, request: Request,
         row = conn.execute("SELECT approval_id FROM intro_files WHERE label = %s", (body.label,)).fetchone()
     if row is None or row["approval_id"] is None:
         raise GateError(ErrorCode.NOT_FOUND, "approval_not_found")
-    return _decide(request, f"/api/approvals/{row['approval_id']}/revoke", body.label)
+    resp = _decide(request, f"/api/approvals/{row['approval_id']}/revoke", body.label)
+    if resp.status_code < 400:
+        _notify_requester(label=body.label, title="발송 회수", verb="회수")
+    return resp

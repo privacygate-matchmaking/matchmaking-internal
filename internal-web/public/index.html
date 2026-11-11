@@ -12,6 +12,28 @@
     <a href="/" class="brand"><span class="brand-icon">이</span>이음<span class="brand-en">IEUM</span></a>
     <span class="header-label">STAFF CONSOLE</span>
     <div id="account" class="account" hidden>
+      <div class="notif">
+        <button type="button" id="bell" class="bell" aria-label="알림" aria-haspopup="true" aria-expanded="false">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22Zm7-6V11a7 7 0 0 0-5.5-6.84V3.5a1.5 1.5 0 0 0-3 0v.66A7 7 0 0 0 5 11v5l-1.7 1.7A1 1 0 0 0 4 19.4h16a1 1 0 0 0 .7-1.7Z"/></svg>
+          <span class="badge" id="bell-badge" hidden>0</span>
+        </button>
+        <div class="notif-panel" id="notif-panel" role="dialog" aria-label="알림" hidden>
+          <div class="notif-head">
+            <strong>알림</strong><span class="muted" id="notif-summary"></span>
+            <span class="spacer"></span>
+            <button type="button" class="text-button" id="notif-read-all">모두 읽음</button>
+            <button type="button" class="text-button danger-text" id="notif-delete-all">모두 삭제</button>
+          </div>
+          <div class="notif-tools">
+            <label class="check"><input type="checkbox" id="notif-select-all"> 전체 선택</label>
+            <span class="spacer"></span>
+            <button type="button" class="btn sm" id="notif-read-sel" disabled>선택 읽음</button>
+            <button type="button" class="btn sm danger" id="notif-delete-sel" disabled>선택 삭제</button>
+          </div>
+          <ul class="notif-list" id="notif-list"></ul>
+          <div class="notif-empty" id="notif-empty" hidden>새 알림이 없습니다.</div>
+        </div>
+      </div>
       <span class="avatar" id="avatar"></span>
       <span id="user-label"></span>
       <button id="logout-btn" type="button" class="text-button">로그아웃</button>
