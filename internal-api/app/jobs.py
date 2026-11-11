@@ -1,4 +1,4 @@
-"""주기 작업: 증빙 원본 기한 삭제.
+"""주기 작업: 증빙 원본 기한 삭제, 탈퇴 유예가 끝난 회원 삭제.
 
 삭제 기한이 지난 증빙(법적 보존 legal_hold 제외)의 원본을 evidence-storage 에서 지우고 상태를 deleted 로 바꾼다.
 성공·실패 모두 감사 로그에 action=evidence_delete 로 남긴다 (실패는 Wazuh 경보 대상).
@@ -39,6 +39,42 @@ def purge_expired_evidence() -> int:
     return done
 
 
+def purge_member(member_id) -> int:
+    """회원과 관련 행을 DB 함수 purge_member 로 지우고, 그 회원의 증빙 암호문 파일도 지운다. 지운 파일 수를 돌려준다.
+    (DB 삭제가 먼저 끝나야 파일을 지운다. 파일 삭제 실패는 감사 로그 error 로 남겨 Wazuh 가 경보)"""
+    with db.connection() as conn:
+        keys = [r["storage_key"] for r in conn.execute("SELECT storage_key FROM purge_member(%s)",
+                                                         (member_id,)).fetchall()]
+    deleted = 0
+    for key in keys:
+        try:
+            storage.delete(key)
+            deleted += 1
+        except Exception:
+            _log.exception("탈퇴 회원 증빙 파일 삭제 실패")
+            audit.writer().record(trace_id=uuid.uuid4().hex, action="evidence_delete", result="error",
+                                  actor="system", target_type="evidence", target_id=key, reason="delete_failed")
+    return deleted
+
+
+def purge_due_members() -> int:
+    """탈퇴 유예(7일)가 끝난 회원을 삭제한다."""
+    with db.connection() as conn:
+        rows = conn.execute("""SELECT member_id, pseudo_id FROM members
+                                WHERE status = 'withdraw_pending' AND withdraw_at <= now()""").fetchall()
+    for row in rows:
+        trace = uuid.uuid4().hex
+        try:
+            purge_member(row["member_id"])
+            audit.writer().record(trace_id=trace, action="member_purge", result="allow", actor="system",
+                                  target_type="member", target_id=row["pseudo_id"])
+        except Exception:
+            _log.exception("탈퇴 회원 삭제 실패")
+            audit.writer().record(trace_id=trace, action="member_purge", result="error", actor="system",
+                                  target_type="member", target_id=row["pseudo_id"], reason="purge_failed")
+    return len(rows)
+
+
 def _loop() -> None:
     interval = get_settings().evidence_purge_seconds
     while not _stop.wait(interval):
@@ -46,6 +82,10 @@ def _loop() -> None:
             purge_expired_evidence()
         except Exception:
             _log.exception("기한 삭제 작업 오류")
+        try:
+            purge_due_members()
+        except Exception:
+            _log.exception("탈퇴 회원 삭제 작업 오류")
 
 
 def start() -> threading.Thread:

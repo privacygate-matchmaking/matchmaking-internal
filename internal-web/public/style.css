@@ -173,3 +173,12 @@ th.sortable:focus-visible{outline:2px solid var(--blue);outline-offset:-2px}
 .card + .section-title, .card + div > .section-title:first-child{margin-top:44px}
 #member-detail + div[data-roles] > .section-title:first-child{margin-top:44px}
 .export-block > .section-title:first-child{margin-top:48px}
+
+/* 확인 팝업 */
+dialog.confirm{border:1px solid var(--border);border-top:3px solid var(--navy);border-radius:4px;padding:28px 30px 24px;max-width:440px;width:calc(100% - 32px);color:var(--ink);box-shadow:0 20px 50px rgba(19,40,77,.25)}
+dialog.confirm::backdrop{background:rgba(19,40,77,.45)}
+dialog.confirm h2{font-size:19px;margin:8px 0 10px}
+dialog.confirm p{font-size:13px;line-height:1.75;color:#45526b;margin:0 0 22px;white-space:pre-line}
+dialog.confirm .actions{justify-content:flex-end;gap:8px}
+dialog.confirm .btn.danger{background:var(--red);border-color:var(--red);color:#fff}
+dialog.confirm .btn.danger:hover{background:#962f3c}

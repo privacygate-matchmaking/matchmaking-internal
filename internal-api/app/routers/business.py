@@ -19,7 +19,7 @@ from privacygate.errors import ErrorCode, GateError
 from privacygate.policy import STAFF_ROLES, Principal, Role
 from pydantic import BaseModel, Field
 
-from .. import audit, db, storage, transfer_client
+from .. import audit, db, jobs, storage, transfer_client
 from ..auth.session import member_via_transfer, require, require_csrf, require_service
 from ..config import get_settings
 
@@ -59,6 +59,7 @@ def me(request: Request, principal: Principal = Depends(require(*STAFF_ROLES))):
 # 회원 조회·관리 (counselor: 담당 회원만 / data_admin=총관리자: 전체)
 # ======================================================================
 MEMBER_ROLES = (Role.COUNSELOR, Role.DATA_ADMIN)
+WITHDRAW_GRACE_DAYS = 7          # 탈퇴 유예 기간
 EDUCATION_LEVELS = ("고졸", "전문대졸", "4년제 대졸", "대학원졸")
 
 # 담당 범위 조건: counselor 는 assignments 에 있는 회원만, data_admin 은 전체
@@ -68,7 +69,7 @@ SCOPE_SQL = """(%(role)s = 'data_admin' OR EXISTS (SELECT 1 FROM assignments a
 # 직원 화면에 보이는 프로필 항목 (연락처는 넣지 않는다)
 PROFILE_COLS = """m.member_id, m.pseudo_id, m.name, m.gender, m.birth_date, m.height_cm, m.weight_kg,
                   m.education_level, m.school, m.major, m.job_group, m.company, m.introduction,
-                  m.education_verified, m.employment_verified, m.status, m.withdrawn_at, m.created_at,
+                  m.education_verified, m.employment_verified, m.status, m.withdraw_requested_at, m.withdraw_at, m.created_at,
                   (m.user_id IS NOT NULL) AS has_account"""
 
 
@@ -91,7 +92,8 @@ def _profile(r) -> dict:
             "education_level": r["education_level"], "school": r["school"], "major": r["major"],
             "job_group": r["job_group"], "company": r["company"], "introduction": r["introduction"],
             "education_verified": r["education_verified"], "employment_verified": r["employment_verified"],
-            "status": r["status"], "has_account": r["has_account"], "created_at": _iso(r["created_at"])}
+            "status": r["status"], "withdraw_at": _iso(r["withdraw_at"]),
+            "has_account": r["has_account"], "created_at": _iso(r["created_at"])}
 
 
 def _member_in_scope(conn, principal: Principal, member_id) -> dict:
@@ -139,7 +141,7 @@ def get_member(member_id: uuid.UUID, request: Request,
             (member_id,)).fetchall()
         matches = _match_rows(conn, member_id, staff=True)
     audit.allow(request, target_type="member", target_id=m["pseudo_id"])
-    return {**_profile(m), "withdrawn_at": _iso(m["withdrawn_at"]),
+    return {**_profile(m),
             "consents": [{"consent_id": str(c["consent_id"]), "consent_label": f"C-{c['consent_no']}",
                           "item": c["item"], "purpose": c["purpose"],
                           "counterpart_pseudo_id": c["counterpart_pseudo_id"],
@@ -186,7 +188,7 @@ def update_member(member_id: uuid.UUID, body: MemberUpdateIn, request: Request,
     with db.connection() as conn:
         m = _member_in_scope(conn, principal, member_id)
         if m["status"] != "active":
-            raise GateError(ErrorCode.INVALID_STATE, "member_withdrawn")
+            raise GateError(ErrorCode.INVALID_STATE, "member_not_active")
         changed = {k for k, v in fields.items() if v != m[k]}
         if EDU_FIELDS & changed:
             fields["education_verified"] = False
@@ -199,28 +201,50 @@ def update_member(member_id: uuid.UUID, body: MemberUpdateIn, request: Request,
     return _profile(row)
 
 
+class WithdrawIn(BaseModel):
+    mode: str = Field(default="scheduled", pattern="^(scheduled|immediate)$")
+
+
 @router.post("/members/{member_id}/withdraw")
-def withdraw_member(member_id: uuid.UUID, request: Request,
+def withdraw_member(member_id: uuid.UUID, body: WithdrawIn, request: Request,
                     principal: Principal = Depends(require(*MEMBER_ROLES)),
                     _csrf: None = Depends(require_csrf)):
-    """탈퇴 처리: 실명·연락처·학교·직장·소개 삭제, 상태 withdrawn, 주고받은 동의 철회, 매칭 취소.
-    회원 행과 감사·반출 기록은 남긴다 (기록이 회원 ID 를 참조). ※ 명세 외 추가"""
+    """탈퇴 처리. ※ 명세 외 추가
+    - scheduled: 탈퇴 예정(유예 7일). 그동안 회원 기능은 막히고(매칭·제공 불가) 직원이 철회할 수 있다.
+      기한이 지나면 주기 작업이 회원 정보를 DB 에서 삭제한다.
+    - immediate: 바로 삭제 (유예 중인 회원도 가능). 회원·동의·매칭·증빙(파일 포함)·소개 자료 기록이 지워진다.
+    삭제 범위는 DB 함수 purge_member 로 고정하며, 감사 로그(회원 코드)는 남긴다."""
     with db.connection() as conn:
         m = _member_in_scope(conn, principal, member_id)
-        if m["status"] != "active":
-            raise GateError(ErrorCode.INVALID_STATE, "member_withdrawn")
-        conn.execute("""UPDATE members SET status = 'withdrawn', withdrawn_at = now(), name = '(탈퇴 회원)',
-                               school = NULL, major = NULL, company = NULL,
-                               introduction = NULL, contact_phone = NULL, contact_email = NULL
+        if body.mode == "scheduled":
+            if m["status"] != "active":
+                raise GateError(ErrorCode.INVALID_STATE, "already_withdraw_pending")
+            row = conn.execute(
+                """UPDATE members SET status = 'withdraw_pending', withdraw_requested_at = now(),
+                          withdraw_at = now() + make_interval(days => %s)
+                    WHERE member_id = %s RETURNING withdraw_at""",
+                (WITHDRAW_GRACE_DAYS, member_id)).fetchone()
+    if body.mode == "scheduled":
+        audit.allow(request, target_type="member_withdraw_scheduled", target_id=m["pseudo_id"])
+        return {"member_id": str(member_id), "status": "withdraw_pending", "withdraw_at": _iso(row["withdraw_at"])}
+    files = jobs.purge_member(member_id)
+    audit.allow(request, target_type="member_purged", target_id=m["pseudo_id"])
+    return {"member_id": str(member_id), "status": "deleted", "deleted_evidence_files": files}
+
+
+@router.post("/members/{member_id}/withdraw/cancel")
+def cancel_withdraw(member_id: uuid.UUID, request: Request,
+                    principal: Principal = Depends(require(*MEMBER_ROLES)),
+                    _csrf: None = Depends(require_csrf)):
+    """탈퇴 철회 (유예 기간 안에서만). ※ 명세 외 추가"""
+    with db.connection() as conn:
+        m = _member_in_scope(conn, principal, member_id)
+        if m["status"] != "withdraw_pending":
+            raise GateError(ErrorCode.INVALID_STATE, "not_withdraw_pending")
+        conn.execute("""UPDATE members SET status = 'active', withdraw_requested_at = NULL, withdraw_at = NULL
                          WHERE member_id = %s""", (member_id,))
-        revoked = conn.execute("""UPDATE consents SET revoked_at = now()
-                                   WHERE revoked_at IS NULL AND (member_id = %s OR counterpart_member_id = %s)""",
-                               (member_id, member_id)).rowcount
-        conn.execute("""UPDATE matches SET cancelled_at = now()
-                         WHERE cancelled_at IS NULL AND (member_id = %s OR counterpart_member_id = %s)""",
-                     (member_id, member_id))
-    audit.allow(request, target_type="member", target_id=m["pseudo_id"])
-    return {"member_id": str(member_id), "status": "withdrawn", "revoked_consents": revoked}
+    audit.allow(request, target_type="member_withdraw_cancelled", target_id=m["pseudo_id"])
+    return {"member_id": str(member_id), "status": "active"}
 
 
 # ======================================================================
@@ -263,7 +287,7 @@ def request_introduction(member_id: uuid.UUID, body: IntroductionIn, request: Re
     with db.connection() as conn:
         m = _member_in_scope(conn, principal, member_id)
         if m["status"] != "active":
-            raise GateError(ErrorCode.INVALID_STATE, "member_withdrawn")
+            raise GateError(ErrorCode.INVALID_STATE, "member_not_active")
         c = conn.execute(
             """SELECT c.consent_id, c.purpose, c.expires_at, rm.user_id AS recipient_id
                  FROM consents c JOIN members rm ON rm.member_id = c.counterpart_member_id

@@ -112,7 +112,7 @@
         <div class="stats">
           <div><span class="small-label">관리 회원</span><strong id="stat-members">—</strong></div>
           <div><span class="small-label">활동 중</span><strong id="stat-active">—</strong></div>
-          <div><span class="small-label">탈퇴</span><strong id="stat-withdrawn">—</strong></div>
+          <div><span class="small-label">탈퇴 예정</span><strong id="stat-withdrawn">—</strong></div>
           <div><span class="small-label">심사 대기 서류</span><strong id="stat-evidence">—</strong></div>
         </div>
         <div class="content-layout"><div class="work">
@@ -163,7 +163,7 @@
               <div class="empty" id="exports-empty" hidden>내보내기 내역이 없습니다.</div>
             </div>
           </div>
-        </div><aside class="guide"><span class="eyebrow">STAFF GUIDE</span><h2>회원 관리</h2><ol><li><p>연락처는 화면에 나오지 않습니다. 학력·직장을 바꾸면 해당 증빙을 다시 심사해야 합니다.</p></li><li><p>탈퇴하면 실명·연락처·학교·직장·소개가 지워지고, 이 회원이 주고받은 동의와 매칭이 모두 철회됩니다. 되돌릴 수 없습니다.</p></li><li><p>상담 직원의 내보내기 내역이 보이면 즉시 확인하세요(총관리자).</p></li><li><p>모든 조회·변경은 추적번호와 함께 감사 로그에 기록됩니다.</p></li></ol></aside></div>
+        </div><aside class="guide"><span class="eyebrow">STAFF GUIDE</span><h2>회원 관리</h2><ol><li><p>연락처는 화면에 나오지 않습니다. 학력·직장을 바꾸면 해당 증빙을 다시 심사해야 합니다.</p></li><li><p>탈퇴는 7일 유예 후 회원 정보가 DB에서 삭제됩니다(그 전에는 철회 가능). 즉시 탈퇴는 바로 삭제되며 되돌릴 수 없습니다.</p></li><li><p>상담 직원의 내보내기 내역이 보이면 즉시 확인하세요(총관리자).</p></li><li><p>모든 조회·변경은 추적번호와 함께 감사 로그에 기록됩니다.</p></li></ol></aside></div>
       </section>
 
       <!-- ③ 회원·서류 조회·심사·승인 (상담: 담당 회원 / 총관리자: 전체) -->
@@ -231,6 +231,15 @@
     </div>
   </main>
   <footer><span class="footer-brand">이음 결혼정보회사 · 내부 업무</span><span>PrivacyGate 개인정보 접근·반출 통제</span><span>가상 기업 · 교육용 시제품</span></footer>
+  <!-- 확인 팝업 (탈퇴 등 되돌리기 어려운 작업) -->
+  <dialog id="confirm-dialog" class="confirm">
+    <form method="dialog">
+      <span class="eyebrow" id="confirm-eyebrow">CONFIRM</span>
+      <h2 id="confirm-title"></h2>
+      <p id="confirm-message"></p>
+      <div class="actions" id="confirm-actions"></div>
+    </form>
+  </dialog>
   <script src="/app.js"></script>
 </body>
 </html>

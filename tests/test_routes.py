@@ -23,6 +23,7 @@ EXPECTED = {
     ("GET", "/api/members/{member_id}"): "roles:counselor,data_admin",
     ("PATCH", "/api/members/{member_id}"): "roles:counselor,data_admin",          # 명세 외 추가
     ("POST", "/api/members/{member_id}/withdraw"): "roles:counselor,data_admin",  # 명세 외 추가
+    ("POST", "/api/members/{member_id}/withdraw/cancel"): "roles:counselor,data_admin",  # 탈퇴 철회 (명세 외 추가)
     ("POST", "/api/members/{member_id}/introductions"): "roles:counselor",       # 소개 자료 발송 요청 (명세 외 추가)
     ("POST", "/api/admin/member-exports"): "roles:data_admin",
     ("GET", "/api/admin/member-exports"): "roles:data_admin",   # 내보내기 내역 (명세 외 추가)
