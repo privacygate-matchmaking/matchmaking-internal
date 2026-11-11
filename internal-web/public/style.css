@@ -172,3 +172,4 @@ th.sortable:focus-visible{outline:2px solid var(--blue);outline-offset:-2px}
 .card h3.sub-h{margin:32px 0 6px}
 .card + .section-title, .card + div > .section-title:first-child{margin-top:44px}
 #member-detail + div[data-roles] > .section-title:first-child{margin-top:44px}
+.export-block > .section-title:first-child{margin-top:48px}
