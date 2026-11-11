@@ -66,14 +66,43 @@ def create_export_request(body: ExportRequestIn, request: Request,
 @router.get("/export-requests")
 def list_export_requests(request: Request,
                          principal: Principal = Depends(require(Role.COUNSELOR, Role.APPROVER))):
-    """counselor: 본인 신청만, approver: 전체 (중계가 토큰으로 구분)."""
-    return transfer_client.relay(transfer_client.call(request, "GET", "/api/export-requests"))
+    """counselor: 본인 신청만, approver: 전체 (중계가 토큰으로 구분). 화면용 가명 ID 를 덧붙인다."""
+    resp = transfer_client.call(request, "GET", "/api/export-requests")
+    if resp.status_code != 200:
+        return transfer_client.relay(resp)
+    body = resp.json()
+    _with_pseudo_ids(body.get("items", []))
+    return body
 
 
 @router.get("/export-requests/{request_id}")
 def get_export_request(request_id: uuid.UUID, request: Request,
                        principal: Principal = Depends(require(Role.COUNSELOR, Role.APPROVER))):
-    return transfer_client.relay(transfer_client.call(request, "GET", f"/api/export-requests/{request_id}"))
+    resp = transfer_client.call(request, "GET", f"/api/export-requests/{request_id}")
+    if resp.status_code != 200:
+        return transfer_client.relay(resp)
+    body = resp.json()
+    _with_pseudo_ids([body])
+    return body
+
+
+def _with_pseudo_ids(items: list[dict]) -> None:
+    """중계 응답의 user_id·member_id(UUID) 옆에 화면용 가명 ID 를 붙인다 (예: S-C01, M-001, M-B01).
+    판단에는 쓰지 않는 표시 정보이며, 없는 값은 붙이지 않는다."""
+    ids = {str(v) for it in items for k in ("requester_id", "recipient_id", "member_id") if (v := it.get(k))}
+    if not ids:
+        return
+    with db.connection() as conn:
+        rows = conn.execute(
+            """SELECT user_id::text AS id, pseudo_id FROM users WHERE user_id::text = ANY(%(ids)s)
+               UNION ALL
+               SELECT member_id::text, pseudo_id FROM members WHERE member_id::text = ANY(%(ids)s)""",
+            {"ids": list(ids)}).fetchall()
+    names = {r["id"]: r["pseudo_id"] for r in rows}
+    for it in items:
+        for k in ("requester_id", "recipient_id", "member_id"):
+            if it.get(k) and str(it[k]) in names:
+                it[k.replace("_id", "_pseudo_id")] = names[str(it[k])]
 
 
 def _decide(request: Request, path: str, target: str):

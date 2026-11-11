@@ -89,6 +89,8 @@ function fill(bodyId, emptyId, rows) {
   $(emptyId).hidden = rows.length > 0;
 }
 function mono(text) { const s = el("span", text, "mono"); s.title = text || ""; return s; }
+// 가명 ID 가 있으면 가명으로, 없으면 UUID 앞 8자리. 마우스를 올리면 전체 UUID
+function who(pseudo, id) { const s = el("span", pseudo || short(id), pseudo ? "" : "mono"); s.title = id || ""; return s; }
 
 // ---- 화면 전환 ----
 function showLogin() {
@@ -324,7 +326,8 @@ function renderApprovals() {
   const items = state.requests.filter((r) => !want || want.includes(r.request_status));
   fill("approvals-body", "approvals-empty", items.map((r) => {
     const mine = r.requester_id === state.me.user_id;
-    const tr = row([mono(short(r.request_id)), mono(short(r.requester_id)), mono(short(r.recipient_id)), r.purpose,
+    const tr = row([mono(short(r.request_id)), who(r.requester_pseudo_id, r.requester_id),
+                    who(r.recipient_pseudo_id, r.recipient_id), r.purpose,
                     pill(r.request_status), toKst(r.expires_at),
                     actions(button(r.request_status === "pending" && !mine ? "심사" : "상세", () => showRequest(r.request_id)))]);
     tr.dataset.id = r.request_id;
@@ -349,15 +352,15 @@ async function showRequest(id) {
   const facts = $("detail-facts");
   facts.replaceChildren();
   fact(facts, "신청 ID", r.request_id, "mono");
-  fact(facts, "신청자", r.requester_id + (mine ? " (본인)" : ""), "mono");
-  fact(facts, "정보 주체 회원", r.member_id, "mono");
-  fact(facts, "수신 회원", r.recipient_id, "mono");
+  fact(facts, "신청 직원", (r.requester_pseudo_id || r.requester_id) + (mine ? " (본인)" : ""));
+  fact(facts, "자료 주인 회원", r.member_pseudo_id || r.member_id);
+  fact(facts, "받는 회원", r.recipient_pseudo_id || r.recipient_id);
   fact(facts, "동의 ID", r.consent_id, "mono");
   fact(facts, "목적", r.purpose);
   fact(facts, "파일", `${r.file_id} (v${r.file_version})`, "mono");
   fact(facts, "파일 해시", r.file_hash, "mono");
   fact(facts, "파일 검사", STATUS[r.scan_status]?.[0] || r.scan_status);
-  fact(facts, "반출 기한", toKst(r.expires_at));
+  fact(facts, "제공 기한", toKst(r.expires_at));
   fact(facts, "신청 시각", toKst(r.created_at));
   const prev = $("detail-preview");
   prev.replaceChildren();
