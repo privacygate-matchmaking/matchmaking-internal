@@ -159,10 +159,64 @@ function withMark(text, ok) {
 }
 const ageText = (m) => (m.age != null ? `만 ${m.age}세` : "-");
 
+// ---- 표 정렬·검색 (화면에서만, 서버가 준 목록 안에서) ----
+const EDU_RANK = { "고졸": 1, "전문대졸": 2, "4년제 대졸": 3, "대학원졸": 4 };
+const SORT_VALUE = {
+  education_level: (m) => EDU_RANK[m.education_level] ?? null,
+  verified: (m) => (m.education_verified ? 2 : 0) + (m.employment_verified ? 1 : 0),
+};
+const tableState = { members: { key: "pseudo_id", dir: 1, q: "" }, manage: { key: "pseudo_id", dir: 1, q: "" } };
+
+function sortAndFilter(items, st, fields) {
+  const q = st.q.trim().toLowerCase();
+  const list = q ? items.filter((m) => fields.some((f) => String(m[f] ?? "").toLowerCase().includes(q))) : items.slice();
+  const get = SORT_VALUE[st.key] || ((m) => m[st.key]);
+  return list.sort((a, b) => {
+    const x = get(a), y = get(b);
+    if (x == null && y == null) return 0;
+    if (x == null) return 1;                 // 빈 값은 항상 뒤로
+    if (y == null) return -1;
+    const c = typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y), "ko");
+    return c * st.dir;
+  });
+}
+
+function bindSort(headId, name, render) {
+  for (const th of $(headId).querySelectorAll("th[data-sort]")) {
+    th.classList.add("sortable");
+    th.tabIndex = 0;
+    const go = () => {
+      const st = tableState[name];
+      if (st.key === th.dataset.sort) st.dir = -st.dir; else { st.key = th.dataset.sort; st.dir = 1; }
+      render();
+    };
+    th.onclick = go;
+    th.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } };
+  }
+}
+
+function markSort(headId, name) {
+  const st = tableState[name];
+  for (const th of $(headId).querySelectorAll("th[data-sort]")) {
+    const on = th.dataset.sort === st.key;
+    th.classList.toggle("asc", on && st.dir === 1);
+    th.classList.toggle("desc", on && st.dir === -1);
+    th.setAttribute("aria-sort", on ? (st.dir === 1 ? "ascending" : "descending") : "none");
+  }
+}
+
 async function loadMembers() {
   const { items } = await getJson("/api/members");
   state.members = items;
-  $("members-count").textContent = `${items.length}명`;
+  renderMembers();
+}
+
+function renderMembers() {
+  const items = sortAndFilter(state.members, tableState.members,
+    ["pseudo_id", "name", "gender", "education_level", "job_group", "counselors"]);
+  $("members-count").textContent = items.length === state.members.length
+    ? `${items.length}명` : `${items.length}명 / 전체 ${state.members.length}명`;
+  markSort("members-head", "members");
   fill("members-body", "members-empty", items.map((m) =>
     row([memberCell(m), m.name ?? "-", m.gender ?? "-", ageText(m), m.height_cm ? `${m.height_cm}cm` : "-",
          withMark(m.education_level, m.education_verified), m.job_group ?? "-", m.counselors || "미배정",
@@ -231,6 +285,16 @@ async function loadManage() {
   $("stat-active").textContent = items.filter((m) => m.status === "active").length;
   $("stat-withdrawn").textContent = items.filter((m) => m.status === "withdrawn").length;
   $("stat-evidence").textContent = items.reduce((n, m) => n + (m.open_evidence || 0), 0);
+  renderManage();
+  if (state.me.role === "data_admin") await loadExports();
+}
+
+function renderManage() {
+  const items = sortAndFilter(state.members, tableState.manage,
+    ["pseudo_id", "name", "gender", "education_level", "job_group", "company", "counselors"]);
+  $("manage-count").textContent = items.length === state.members.length
+    ? `${items.length}명` : `${items.length}명 / 전체 ${state.members.length}명`;
+  markSort("manage-head", "manage");
   fill("manage-body", "manage-empty", items.map((m) => {
     const active = m.status === "active";
     const ev = el("div");
@@ -241,7 +305,6 @@ async function loadManage() {
                 active ? actions(button("수정", () => openEdit(m)),
                                  button("탈퇴", () => withdraw(m), "btn sm danger")) : "-"]);
   }));
-  if (state.me.role === "data_admin") await loadExports();
 }
 
 function openEdit(m) {
@@ -444,6 +507,10 @@ async function init() {
   $("export-btn").onclick = async () => { $("export-btn").disabled = true; try { await runExport(); } finally { $("export-btn").disabled = false; } };
   $("revoke-form").onsubmit = (ev) => { ev.preventDefault(); revoke($("revoke-id").value.trim()); };
   $("edit-form").onsubmit = saveEdit;
+  bindSort("members-head", "members", renderMembers);
+  bindSort("manage-head", "manage", renderManage);
+  $("members-search").oninput = (e) => { tableState.members.q = e.target.value; renderMembers(); };
+  $("manage-search").oninput = (e) => { tableState.manage.q = e.target.value; renderManage(); };
   $("edit-cancel").onclick = () => { $("edit-card").hidden = true; };
   for (const chip of $("evidence-filters").querySelectorAll(".chip")) {
     chip.onclick = () => {

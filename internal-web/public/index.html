@@ -60,9 +60,10 @@
         <div class="page-heading"><div><span class="eyebrow">ASSIGNED MEMBERS</span><h1>담당 회원 조회</h1><p class="muted" data-roles="counselor">나에게 배정된 회원만 보입니다. 서로 매칭된 회원 사이에서 소개 자료 발송을 요청할 수 있습니다.</p><p class="muted" data-roles="data_admin">총관리자는 전체 회원과 담당 배정을 봅니다.</p></div></div>
         <div class="content-layout"><div class="work">
           <div class="section-title"><h2>회원 목록</h2><span class="muted" id="members-count"></span></div>
+          <div class="searchbar"><input type="search" id="members-search" placeholder="회원 코드·이름·학력·직군·담당 직원으로 검색" aria-label="회원 검색"></div>
           <div class="tablewrap">
             <table>
-              <thead><tr><th>회원</th><th>이름</th><th>성별</th><th>나이</th><th>키</th><th>학력</th><th>직군</th><th>담당 직원</th><th>상태</th><th>관리</th></tr></thead>
+              <thead id="members-head"><tr><th data-sort="pseudo_id">회원</th><th data-sort="name">이름</th><th data-sort="gender">성별</th><th data-sort="age">나이</th><th data-sort="height_cm">키</th><th data-sort="education_level">학력</th><th data-sort="job_group">직군</th><th data-sort="counselors">담당 직원</th><th data-sort="status">상태</th><th>관리</th></tr></thead>
               <tbody id="members-body"></tbody>
             </table>
             <div class="empty" id="members-empty" hidden>회원이 없습니다.</div>
@@ -70,7 +71,7 @@
           <div class="card mt16" id="member-detail" hidden>
             <div class="row-between"><h2 id="member-detail-title"></h2><span id="member-detail-status"></span></div>
             <dl class="facts" id="member-facts"></dl>
-            <h3 class="mt16">매칭 현황</h3>
+            <h3 class="sub-h">매칭 현황</h3>
             <p class="muted">회원이 외부 화면에서 서로 매칭을 누르면 양쪽 프로필 제공 동의(30일)가 자동으로 만들어집니다.</p>
             <div class="tablewrap">
               <table>
@@ -79,7 +80,7 @@
               </table>
               <div class="empty" id="matches-empty" hidden>소개된 상대가 없습니다.</div>
             </div>
-            <h3 class="mt16">제공 동의</h3>
+            <h3 class="sub-h">제공 동의</h3>
             <div class="tablewrap">
               <table>
                 <thead><tr><th>받는 회원</th><th>항목</th><th>목적</th><th>만료</th><th>상태</th><th data-roles="counselor">관리</th></tr></thead>
@@ -115,10 +116,11 @@
           <div><span class="small-label">심사 대기 서류</span><strong id="stat-evidence">—</strong></div>
         </div>
         <div class="content-layout"><div class="work">
-          <div class="section-title"><h2>회원 정보</h2><span class="muted">새 회원은 상담 직원에게 무작위로 배정됩니다</span></div>
+          <div class="section-title"><h2>회원 정보</h2><span class="muted"><span id="manage-count"></span> · 새 회원은 상담 직원에게 무작위로 배정됩니다</span></div>
+          <div class="searchbar"><input type="search" id="manage-search" placeholder="회원 코드·이름·학력·직군·직장·담당 직원으로 검색" aria-label="회원 검색"></div>
           <div class="tablewrap">
             <table>
-              <thead><tr><th>회원</th><th>이름</th><th>성별</th><th>나이</th><th>학력</th><th>직군 · 직장</th><th>증빙</th><th>담당 직원</th><th>상태</th><th>관리</th></tr></thead>
+              <thead id="manage-head"><tr><th data-sort="pseudo_id">회원</th><th data-sort="name">이름</th><th data-sort="gender">성별</th><th data-sort="age">나이</th><th data-sort="education_level">학력</th><th data-sort="job_group">직군 · 직장</th><th data-sort="verified">증빙</th><th data-sort="counselors">담당 직원</th><th data-sort="status">상태</th><th>관리</th></tr></thead>
               <tbody id="manage-body"></tbody>
             </table>
             <div class="empty" id="manage-empty" hidden>회원이 없습니다.</div>
