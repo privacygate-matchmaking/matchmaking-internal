@@ -275,7 +275,9 @@ async function showMember(memberId) {
   fact(f, "직군 · 직장", `${m.job_group ?? "-"}${m.company ? ` · ${m.company}` : ""}  [재직 증빙 ${m.employment_verified ? "통과 — 직장 공개" : "미확인 — 직장 비공개"}]`);
   fact(f, "소개", m.introduction ?? "-", "long");
   if (m.status === "withdraw_pending") {
-    fact(f, "탈퇴 요청", `${m.withdraw_by ?? "-"}${m.withdraw_by_role === "data_admin" ? " (총관리자)" : ""} · ${toKst(m.withdraw_requested_at)} → ${toKst(m.withdraw_at)} 삭제 예정`);
+    const by = m.withdraw_by_role === "member" ? "회원 본인 신청"
+             : `${m.withdraw_by ?? "-"}${m.withdraw_by_role === "data_admin" ? " (총관리자)" : ""}`;
+    fact(f, "탈퇴 요청", `${by} · ${toKst(m.withdraw_requested_at)} → ${toKst(m.withdraw_at)} 삭제 예정`);
     fact(f, "탈퇴 사유", m.withdraw_reason || "(입력 안 함)", "long");
   }
   const yes = (v) => el("span", v ? "매칭함" : "-", v ? "pill" : "muted");

@@ -33,6 +33,10 @@ class Settings:
     evidence_retention_days: int = 7                 # 심사 후 원본 보관 기간
     evidence_unreviewed_days: int = 30               # 심사 전 원본 최대 보관 기간
     evidence_purge_seconds: int = 300                # 기한 삭제 작업 주기
+    kc_admin_client_id: str = "internal-admin"       # 회원 Keycloak 계정 삭제 전용 (service account, manage-users)
+    kc_admin_client_secret: str = ""
+    kc_realm: str = "matchmaking"
+    member_notice_days: int = 30                     # 탈퇴 확정 후 "탈퇴된 계정" 안내를 보여 주는 기간. 지나면 Keycloak 계정 삭제
 
     @property
     def redirect_uri(self) -> str:
@@ -58,4 +62,8 @@ def get_settings() -> Settings:
         evidence_retention_days=int(os.environ.get("EVIDENCE_RETENTION_DAYS", "7")),
         evidence_unreviewed_days=int(os.environ.get("EVIDENCE_UNREVIEWED_DAYS", "30")),
         evidence_purge_seconds=int(os.environ.get("EVIDENCE_PURGE_SECONDS", "300")),
+        kc_admin_client_id=os.environ.get("KC_ADMIN_CLIENT_ID", "internal-admin"),
+        kc_admin_client_secret=os.environ.get("KC_ADMIN_CLIENT_SECRET", ""),
+        kc_realm=os.environ.get("KC_REALM", "matchmaking"),
+        member_notice_days=int(os.environ.get("MEMBER_NOTICE_DAYS", "30")),
     )

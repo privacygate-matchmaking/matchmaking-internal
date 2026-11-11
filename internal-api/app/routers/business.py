@@ -20,7 +20,7 @@ from privacygate.policy import STAFF_ROLES, Principal, Role
 from pydantic import BaseModel, Field
 
 from .. import audit, db, jobs, notify, storage, transfer_client
-from ..auth.session import member_via_transfer, require, require_csrf, require_service
+from ..auth.session import member_token_via_transfer, member_via_transfer, require, require_csrf, require_service
 from ..config import get_settings
 
 router = APIRouter(prefix="/api", tags=["business"])
@@ -241,6 +241,17 @@ def withdraw_member(member_id: uuid.UUID, body: WithdrawIn, request: Request,
             else:                                             # 상담 직원 요청 → 총관리자에게
                 notify.to_role(conn, "data_admin", "withdraw_requested", f"탈퇴 요청 ({principal.pseudo_id})", text, "manage")
         else:
+            # 회원 탈퇴 안내용 요청자·사유 기록 (purge_member 가 읽음).
+            # 활성 회원 → 총관리자 처리로 기록. 유예 중 → 처음 요청자를 유지하고, 직원 요청 건이면 새 사유로 바꿀 수 있다
+            conn.execute(
+                """UPDATE members SET
+                          withdraw_requested_by = CASE WHEN status = 'active' THEN %(by)s ELSE withdraw_requested_by END,
+                          withdraw_reason = CASE
+                              WHEN status = 'active' THEN %(reason)s
+                              WHEN %(reason)s::text IS NOT NULL AND withdraw_requested_by IS DISTINCT FROM user_id THEN %(reason)s
+                              ELSE withdraw_reason END
+                    WHERE member_id = %(mid)s""",
+                {"by": principal.user_id, "reason": reason, "mid": member_id})
             # 즉시 삭제 전에 담당 직원에게 알림 (삭제 뒤에는 담당 관계도 지워짐)
             notify.to_counselors_of(conn, member_id, "member_deleted", "회원 즉시 탈퇴",
                                     f"{m['pseudo_id']} {m['name']} 회원 정보가 총관리자에 의해 삭제되었습니다.",
@@ -800,6 +811,97 @@ def cancel_match(counterpart_member_id: uuid.UUID, request: Request,
             (MATCH_CONSENT_ITEM, MATCH_CONSENT_PURPOSE, me_id, other, other, me_id)).rowcount
     audit.allow(request, target_type="match", target_id=str(other))
     return {"counterpart_member_id": str(other), "cancelled": True, "revoked_consents": revoked}
+
+
+# ======================================================================
+# 회원 본인 계정 상태·탈퇴 (외부 화면에서 로그인 직후 my-status 로 안내 문구를 정한다)
+# ======================================================================
+def _status_message(status: str, by_staff: bool, reason: str | None, when) -> str:
+    day = when.astimezone(timezone(timedelta(hours=9))).strftime("%Y-%m-%d") if when else ""
+    why = f" 사유: {reason}" if reason else " 사유: (입력 없음)"
+    if status == "withdrawn":
+        return f"관리자에 의해 탈퇴 처리된 계정입니다.{why}" if by_staff else "탈퇴된 계정입니다."
+    if by_staff:
+        return f"관리자에 의해 탈퇴 처리 중인 계정입니다 ({day} 삭제 예정).{why} 문의는 담당 상담 직원에게 해 주세요."
+    return f"탈퇴 신청한 계정입니다 ({day} 삭제 예정). 그 전까지 탈퇴를 철회할 수 있습니다."
+
+
+@router.get("/internal/my-status")
+def my_status(request: Request, sub: str = Depends(member_token_via_transfer)):
+    """내 계정 상태. ※ 명세 외 추가
+    - active: 정상
+    - withdraw_pending: 탈퇴 유예 중 (by=self|staff, 직원 처리면 reason, withdraw_at). 회원 기능은 막혀 있다.
+    - withdrawn: 탈퇴 확정 (회원 정보 삭제됨). 안내 기간이 지나면 로그인 계정도 삭제된다.
+    - not_registered: 업무 DB 에 회원 정보가 없음
+    message 는 화면에 그대로 보여 줄 안내 문구."""
+    with db.connection() as conn:
+        m = conn.execute(
+            """SELECT m.status, m.withdraw_at, m.withdraw_reason,
+                      (m.withdraw_requested_by IS DISTINCT FROM m.user_id) AS by_staff
+                 FROM members m JOIN users u ON u.user_id = m.user_id
+                WHERE m.user_id = %s AND u.active AND u.role = 'member'""", (sub,)).fetchone()
+        notice = None if m else conn.execute(
+            "SELECT by_staff, reason, withdrawn_at FROM withdrawal_notices WHERE user_id = %s", (sub,)).fetchone()
+    audit.allow(request, target_type="member_status")
+    if m and m["status"] == "active":
+        return {"status": "active", "message": None}
+    if m:
+        by_staff, reason = m["by_staff"], (m["withdraw_reason"] if m["by_staff"] else None)
+        return {"status": "withdraw_pending", "by": "staff" if by_staff else "self", "reason": reason,
+                "withdraw_at": _iso(m["withdraw_at"]), "can_cancel": not by_staff,
+                "message": _status_message("withdraw_pending", by_staff, reason, m["withdraw_at"])}
+    if notice:
+        reason = notice["reason"] if notice["by_staff"] else None
+        return {"status": "withdrawn", "by": "staff" if notice["by_staff"] else "self", "reason": reason,
+                "withdrawn_at": _iso(notice["withdrawn_at"]),
+                "message": _status_message("withdrawn", notice["by_staff"], reason, None)}
+    return {"status": "not_registered", "message": "회원 정보가 없습니다. 고객센터로 문의해 주세요."}
+
+
+class MyWithdrawIn(BaseModel):
+    reason: str | None = Field(default=None, max_length=200)     # 직원 화면에만 보이는 탈퇴 사유 (선택)
+
+
+@router.post("/internal/my-withdrawal")
+def my_withdraw(body: MyWithdrawIn, request: Request, member: Principal = Depends(member_via_transfer)):
+    """회원 본인 탈퇴 신청: 7일 유예 후 삭제. 유예 중에는 본인이 철회할 수 있다. ※ 명세 외 추가"""
+    owner = _member_of(member.user_id)          # 활성 회원만 (이미 유예 중이면 거부)
+    reason = (body.reason or "").strip() or None
+    with db.connection() as conn:
+        row = conn.execute(
+            """UPDATE members SET status = 'withdraw_pending', withdraw_requested_at = now(),
+                      withdraw_at = now() + make_interval(days => %s),
+                      withdraw_requested_by = user_id, withdraw_reason = %s
+                WHERE member_id = %s AND status = 'active' RETURNING withdraw_at""",
+            (WITHDRAW_GRACE_DAYS, reason, owner["member_id"])).fetchone()
+        if row is None:
+            raise GateError(ErrorCode.INVALID_STATE, "already_withdraw_pending")
+        text = f"{notify.member_label(conn, owner['member_id'])} 회원이 직접 탈퇴를 신청했습니다 (7일 후 삭제)."
+        notify.to_counselors_of(conn, owner["member_id"], "withdraw_requested", "회원 탈퇴 신청", text, "manage")
+        notify.to_role(conn, "data_admin", "withdraw_requested", "회원 탈퇴 신청", text, "manage")
+    audit.allow(request, target_type="member_withdraw_self", target_id=owner["pseudo_id"])
+    return {"status": "withdraw_pending", "withdraw_at": _iso(row["withdraw_at"])}
+
+
+@router.post("/internal/my-withdrawal/cancel")
+def my_withdraw_cancel(request: Request, member: Principal = Depends(member_via_transfer)):
+    """본인이 신청한 탈퇴만 철회할 수 있다 (직원이 처리한 탈퇴는 거부). ※ 명세 외 추가"""
+    with db.connection() as conn:
+        m = conn.execute(
+            """SELECT member_id, pseudo_id, (withdraw_requested_by = user_id) AS by_self FROM members
+                WHERE user_id = %s AND status = 'withdraw_pending'""", (member.user_id,)).fetchone()
+        if m is None:
+            raise GateError(ErrorCode.INVALID_STATE, "not_withdraw_pending")
+        if not m["by_self"]:
+            raise GateError(ErrorCode.ACCESS_DENIED, "withdraw_requested_by_staff")
+        conn.execute("""UPDATE members SET status = 'active', withdraw_requested_at = NULL, withdraw_at = NULL,
+                               withdraw_requested_by = NULL, withdraw_reason = NULL
+                         WHERE member_id = %s""", (m["member_id"],))
+        text = f"{notify.member_label(conn, m['member_id'])} 회원이 탈퇴 신청을 철회했습니다."
+        notify.to_counselors_of(conn, m["member_id"], "withdraw_cancelled", "탈퇴 철회", text, "manage")
+        notify.to_role(conn, "data_admin", "withdraw_cancelled", "탈퇴 철회", text, "manage")
+    audit.allow(request, target_type="member_withdraw_self_cancelled", target_id=m["pseudo_id"])
+    return {"status": "active"}
 
 
 # ======================================================================

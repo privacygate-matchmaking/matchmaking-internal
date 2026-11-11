@@ -4,7 +4,8 @@
 - require(*roles): 경로별 허용 역할 선언 (privacygate.web.role_guard).
 - require_csrf: 상태를 바꾸는 요청의 Origin·CSRF 토큰 검사.
 - require_service(*clients): 서버 간 API 의 서비스 토큰 검사.
-- member_via_transfer: 회원 증빙 제출 (transfer-api 서비스 토큰 + 회원 access token).
+- member_via_transfer: 회원 본인 기능 (transfer-api 서비스 토큰 + 회원 access token, 활성 회원만).
+- member_token_via_transfer: 위와 같은 토큰 검증만 하고 회원 행은 요구하지 않음 (탈퇴 안내 조회 전용).
 """
 from datetime import datetime, timezone
 
@@ -74,18 +75,31 @@ USER_TOKEN_HEADER = "X-User-Token"
 _from_transfer = service_guard(service_verifier, "transfer-api")
 
 
-def member_via_transfer(request: Request, _svc: dict = Depends(_from_transfer)) -> Principal:
-    """회원 증빙 제출 경로: external-web → external-api → transfer-api → internal-api.
-
-    transfer-api 서비스 토큰(Authorization)과 회원 access token(X-User-Token, aud=internal-api,
-    azp=external-web)을 모두 검증한다. 제출자는 회원 토큰 sub 이며, DB 에서 활성 회원인지 다시 확인한다.
-    """
+def _member_claims(request: Request) -> dict:
     token = request.headers.get(USER_TOKEN_HEADER)
     if not token:
         raise GateError(ErrorCode.AUTH_REQUIRED, "member_token_missing")
     claims = service_verifier().verify(token)
     if claims.get("azp") != "external-web" or role_from_claims(claims) != Role.MEMBER.value:
         raise GateError(ErrorCode.ACCESS_DENIED, "not_member_token")
+    return claims
+
+
+def member_token_via_transfer(request: Request, _svc: dict = Depends(_from_transfer)) -> str:
+    """탈퇴 안내 조회(my-status) 전용: 토큰만 검증하고 sub 를 돌려준다.
+    탈퇴가 확정되면 users 행이 지워지므로 활성 회원 확인을 하지 않는다. 이 sub 로 본인 상태만 조회한다."""
+    sub = _member_claims(request)["sub"]
+    request.state.principal = Principal(user_id=sub, pseudo_id="-", role=Role.MEMBER.value)
+    return sub
+
+
+def member_via_transfer(request: Request, _svc: dict = Depends(_from_transfer)) -> Principal:
+    """회원 본인 기능 경로: external-web → external-api → transfer-api → internal-api.
+
+    transfer-api 서비스 토큰(Authorization)과 회원 access token(X-User-Token, aud=internal-api,
+    azp=external-web)을 모두 검증한다. 제출자는 회원 토큰 sub 이며, DB 에서 활성 회원인지 다시 확인한다.
+    """
+    claims = _member_claims(request)
     with db.connection() as conn:
         row = conn.execute("SELECT user_id, pseudo_id, role, active FROM users WHERE user_id = %s",
                            (claims["sub"],)).fetchone()

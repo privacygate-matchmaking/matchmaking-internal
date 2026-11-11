@@ -37,6 +37,9 @@ Keycloak client: `internal-web`, `external-web` · 쿠키: `internal_session`, `
 | POST | /api/evidence-files/{file_id}/review | counselor(담당 회원), data_admin(전체) | 심사 결과(통과·반려) 저장, 원본 삭제 기한 설정 |
 | POST | /api/internal/disclosure-checks | 서비스: transfer-api | 수신자-회원 관계·동의 확인 (결과만 응답) |
 | GET | /api/internal/my-evidence-files | 서비스: transfer-api + 회원 토큰 | 내 증빙 심사 상태 (원본·심사자 정보 없음) ※명세 외 추가 |
+| GET | /api/internal/my-status | 서비스: transfer-api + 회원 토큰 (회원 행 없어도 됨) | 내 계정 상태·탈퇴 안내 문구. 외부 화면은 로그인 직후 호출 ※명세 외 추가 |
+| POST | /api/internal/my-withdrawal | 서비스: transfer-api + 회원 토큰 | 회원 본인 탈퇴 신청 (7일 유예) ※명세 외 추가 |
+| POST | /api/internal/my-withdrawal/cancel | 서비스: transfer-api + 회원 토큰 | 본인이 신청한 탈퇴만 철회 (직원 처리 건은 403) ※명세 외 추가 |
 | GET | /api/internal/my-consents | 서비스: transfer-api + 회원 토큰 | 내 동의 목록 ※명세 외 추가 |
 | POST | /api/internal/my-consents | 서비스: transfer-api + 회원 토큰 | 동의 등록 (상대 회원·항목·목적·만료) ※명세 외 추가 |
 | POST | /api/internal/my-consents/{consent_id}/revoke | 서비스: transfer-api + 회원 토큰 | 동의 철회 ※명세 외 추가 |
@@ -102,6 +105,9 @@ external-api 에는 업무 DB·증빙 저장소 접근 권한이 없다.
 | `POST /api/evidence-files/{file_id}/review` | `{"result": "passed"\|"rejected"}` → `{file_id, status: "reviewed", review_result, delete_after}` (삭제 기한 +7일) |
 | `POST /api/internal/disclosure-checks` | `{member_id, recipient_id, consent_id, purpose, item}` → 허용 `{"allowed": true, "expires_at", "member_pseudo_id"}`, 거부 `{"allowed": false}` 또는 공통 403. 조회 실패·미구현을 허용으로 해석하지 않음. 신청·승인·다운로드마다 재호출 |
 | `POST /api/evidence-files` | multipart `file`(PDF ≤2MiB) + `kind`(`education`=졸업증명서 / `employment`=재직증명서, 생략 시 education) → 201 `{file_id, kind, status}`. 통과 시 학력 → 매칭 가능, 재직 → 소개 자료에 직장 포함 |
+| `GET /api/internal/my-status` | → `{"status": "active"\|"withdraw_pending"\|"withdrawn"\|"not_registered", "by"?: "self"\|"staff", "reason"?: (직원 처리 건만), "withdraw_at"?, "withdrawn_at"?, "can_cancel"?, "message": "화면에 그대로 보여 줄 문구"}`. 예: 직원 처리 확정 "관리자에 의해 탈퇴 처리된 계정입니다. 사유: …", 본인 탈퇴 확정 "탈퇴된 계정입니다." 탈퇴 확정 후 안내 기간(기본 30일)이 지나면 Keycloak 계정이 삭제되어 로그인 자체가 안 됨 |
+| `POST /api/internal/my-withdrawal` | `{"reason"?: "≤200자"}` → `{status: "withdraw_pending", withdraw_at}`. 이미 유예 중이면 409 |
+| `POST /api/internal/my-withdrawal/cancel` | `{}` → `{status: "active"}`. 유예 중 아님 409, 직원이 처리한 탈퇴 403 `withdraw_requested_by_staff` |
 | `GET /api/internal/my-evidence-files` | → `{"items": [{file_id, status, created_at, review_result?}]}` (status: submitted / in_review / reviewed / deleted) |
 | `GET /api/internal/my-consents` | → `{"items": [{consent_id, consent_label, counterpart_label, item, purpose, expires_at, revoked_at}], "counterparts": [{counterpart_member_id, counterpart_label}]}` (counterpart_label 예: "소개 상대 · 만 32세 · 4년제 대졸", 회원 코드는 주지 않음) (counterparts = 소개된 상대만, `introductions` 테이블) |
 | `POST /api/internal/my-consents` | `{counterpart_member_id, item, purpose, expires_at}` → 201 `{consent_id, ...}`. 소개된 상대인지 내부에서 확인 |

@@ -40,6 +40,9 @@ EXPECTED = {
     ("POST", "/api/internal/my-matches"): "service:transfer-api",                      # 명세 외 추가
     ("POST", "/api/internal/my-matches/{counterpart_member_id}/cancel"): "service:transfer-api",  # 명세 외 추가
     ("POST", "/api/internal/disclosure-checks"): "service:transfer-api",
+    ("GET", "/api/internal/my-status"): "service:transfer-api",                       # 탈퇴 안내 (명세 외 추가)
+    ("POST", "/api/internal/my-withdrawal"): "service:transfer-api",                  # 회원 본인 탈퇴 (명세 외 추가)
+    ("POST", "/api/internal/my-withdrawal/cancel"): "service:transfer-api",
     ("POST", "/api/transfer-files"): "roles:counselor",
     ("POST", "/api/export-requests"): "roles:counselor",
     ("GET", "/api/export-requests"): "roles:approver,counselor",
