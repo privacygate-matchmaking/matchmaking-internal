@@ -215,3 +215,4 @@ GitHub 조직 `privacygate-matchmaking`에 세 레포를 두고, 같은 상위 �
 | 총관리자 계정 `super_admin` (data_admin 역할) | 전체 회원·증빙 관리 담당. 새 역할을 만들지 않아 중계의 역할 확인과 호환 |
 | 메뉴 4개: 담당 회원 조회 / 회원 관리 / 회원·서류 조회·심사·승인 / 소개 자료 발송 승인 | 역할별 화면 정리 (앞의 3개는 counselor·data_admin, 마지막은 approver) |
 | 소개 자료를 직원이 업로드하지 않고 서버가 회원 DB 로 생성 (`POST /api/members/{id}/introductions`) | 직원이 임의 파일을 회원 자료로 보내는 경로 제거. 자료에는 가명 ID·연령대·직업·증빙 확인 여부만 (이름·연락처·증빙 원본 제외). 승인은 그대로 다른 승인자 |
+| 화면용 짧은 이름: 소개 자료 `M-001_file1`, 동의 `C-n`, 직원·회원 가명 ID (`intro_files` 테이블, `consents.consent_no`) | 중계·DB 의 실제 키(UUID)는 그대로 두고 화면에만 짧은 이름 사용. 승인 회수도 이름으로 (`POST /api/approvals/revoke-by-label`) |

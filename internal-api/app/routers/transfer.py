@@ -72,6 +72,7 @@ def list_export_requests(request: Request,
         return transfer_client.relay(resp)
     body = resp.json()
     _with_pseudo_ids(body.get("items", []))
+    _with_labels(body.get("items", []))
     return body
 
 
@@ -83,7 +84,30 @@ def get_export_request(request_id: uuid.UUID, request: Request,
         return transfer_client.relay(resp)
     body = resp.json()
     _with_pseudo_ids([body])
+    _with_labels([body])
     return body
+
+
+def _with_labels(items: list[dict]) -> None:
+    """화면용 짧은 이름: 소개 자료 이름(M-001_file1), 동의 번호(C-n), 알고 있는 approval_id."""
+    req_ids = [str(it["request_id"]) for it in items if it.get("request_id")]
+    con_ids = [str(it["consent_id"]) for it in items if it.get("consent_id")]
+    if not req_ids:
+        return
+    with db.connection() as conn:
+        files = {str(r["request_id"]): r for r in conn.execute(
+            "SELECT request_id, label, approval_id FROM intro_files WHERE request_id::text = ANY(%s)",
+            (req_ids,)).fetchall()}
+        cons = {str(r["consent_id"]): r["consent_no"] for r in conn.execute(
+            "SELECT consent_id, consent_no FROM consents WHERE consent_id::text = ANY(%s)", (con_ids,)).fetchall()}
+    for it in items:
+        f = files.get(str(it.get("request_id")))
+        if f:
+            it["label"] = f["label"]
+            if f["approval_id"] and not it.get("approval_id"):
+                it["approval_id"] = str(f["approval_id"])
+        if str(it.get("consent_id")) in cons:
+            it["consent_label"] = f"C-{cons[str(it['consent_id'])]}"
 
 
 def _with_pseudo_ids(items: list[dict]) -> None:
@@ -116,8 +140,19 @@ def _decide(request: Request, path: str, target: str):
 def approve_export_request(request_id: uuid.UUID, request: Request,
                            principal: Principal = Depends(require(Role.APPROVER)),
                            _csrf: None = Depends(require_csrf)):
-    """신청자 = 승인자면 중계가 거부. 회원 동의는 중계가 disclosure-checks 로 다시 확인."""
-    return _decide(request, f"/api/export-requests/{request_id}/approve", str(request_id))
+    """신청자 = 승인자면 중계가 거부. 회원 동의는 중계가 disclosure-checks 로 다시 확인.
+    중계가 준 approval_id 를 소개 자료 이름과 이어 저장한다 (이름으로 회수할 수 있게)."""
+    resp = transfer_client.call(request, "POST", f"/api/export-requests/{request_id}/approve", json={})
+    if resp.status_code < 400:
+        approval_id = resp.json().get("approval_id")
+        if approval_id:
+            with db.connection() as conn:
+                conn.execute("UPDATE intro_files SET approval_id = %s WHERE request_id = %s",
+                             (approval_id, request_id))
+        audit.allow(request, target_type="export_request", target_id=str(request_id))
+    else:
+        audit.deny(request, f"transfer_status_{resp.status_code}")
+    return transfer_client.relay(resp)
 
 
 @router.post("/export-requests/{request_id}/reject")
@@ -132,3 +167,19 @@ def revoke_approval(approval_id: uuid.UUID, request: Request,
                     principal: Principal = Depends(require(Role.APPROVER)),
                     _csrf: None = Depends(require_csrf)):
     return _decide(request, f"/api/approvals/{approval_id}/revoke", str(approval_id))
+
+
+class RevokeByLabelIn(BaseModel):
+    label: str = Field(pattern=r"^[A-Za-z0-9-]{1,32}_file[0-9]{1,6}$")
+
+
+@router.post("/approvals/revoke-by-label")
+def revoke_by_label(body: RevokeByLabelIn, request: Request,
+                    principal: Principal = Depends(require(Role.APPROVER)),
+                    _csrf: None = Depends(require_csrf)):
+    """소개 자료 이름(예: M-001_file1)으로 승인 회수. 이름 → approval_id 는 내부 DB 에서 찾는다. ※ 명세 외 추가"""
+    with db.connection() as conn:
+        row = conn.execute("SELECT approval_id FROM intro_files WHERE label = %s", (body.label,)).fetchone()
+    if row is None or row["approval_id"] is None:
+        raise GateError(ErrorCode.NOT_FOUND, "approval_not_found")
+    return _decide(request, f"/api/approvals/{row['approval_id']}/revoke", body.label)

@@ -87,7 +87,7 @@ external-api 에는 업무 DB·증빙 저장소 접근 권한이 없다.
 | `GET /api/members/{member_id}` | → `{member_id, pseudo_id, birth_year, job, consents: [{consent_id, item, purpose, counterpart_pseudo_id, recipient_id, expires_at, revoked_at, valid}]}`. 담당 아니면 404 |
 | `GET /api/members` | → `{"items": [{member_id, pseudo_id, birth_year, job, status, has_account, counselors, valid_consents, open_evidence, created_at}]}` (counselor: 담당 회원, data_admin: 전체) |
 | `PATCH /api/members/{member_id}` | `{birth_year?, job?}` → `{member_id, birth_year, job}` |
-| `POST /api/members/{member_id}/introductions` | `{consent_id}` → 201 `{request_id, request_status, created_at, file_id, profile}` (profile = 중계에 보낸 소개 JSON) |
+| `POST /api/members/{member_id}/introductions` | `{consent_id}` → 201 `{request_id, request_status, created_at, label, file_id, profile}` (label = 화면용 이름 `M-001_file1`, 중계 파일 이름도 같음) (profile = 중계에 보낸 소개 JSON) |
 | `POST /api/members/{member_id}/withdraw` | `{}` → `{member_id, status: "withdrawn", revoked_consents}` |
 | `GET /api/internal/my-matches` | → `{"items": [{counterpart_member_id, counterpart_pseudo_id, i_matched, they_matched, matched, matched_at}]}` (소개된 상대만) |
 | `POST /api/internal/my-matches` | `{counterpart_member_id}` → 201 `{counterpart_member_id, matched}`. 서로 누르면 양쪽 프로필 제공 동의(item=profile, purpose=introduction, 30일) 자동 생성 |
@@ -131,3 +131,5 @@ external-api 에는 업무 DB·증빙 저장소 접근 권한이 없다.
 | 500 | INTERNAL_ERROR | 서버 오류 |
 
 판단 근거(reason)는 응답에 넣지 않고 감사 로그에만 남긴다.
+| `POST /api/approvals/revoke-by-label` | `{"label": "M-001_file1"}` → 중계 회수 응답 그대로. 이름 → approval_id 는 내부 `intro_files` 에서 찾음 ※명세 외 추가 |
+| `GET /api/export-requests`, `/{request_id}` (내부 전달) | 중계 응답에 화면용 필드 추가: `label`, `consent_label`(C-n), `requester_pseudo_id`·`member_pseudo_id`·`recipient_pseudo_id`, 알고 있으면 `approval_id` |

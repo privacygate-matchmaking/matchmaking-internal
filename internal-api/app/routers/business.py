@@ -111,7 +111,7 @@ def get_member(member_id: uuid.UUID, request: Request,
     with db.connection() as conn:
         m = _member_in_scope(conn, principal, member_id)
         consents = conn.execute(
-            """SELECT c.consent_id, c.item, c.purpose, c.expires_at, c.revoked_at,
+            """SELECT c.consent_id, c.consent_no, c.item, c.purpose, c.expires_at, c.revoked_at,
                       cm.pseudo_id AS counterpart_pseudo_id, cm.user_id AS recipient_id
                  FROM consents c JOIN members cm ON cm.member_id = c.counterpart_member_id
                 WHERE c.member_id = %s ORDER BY c.granted_at DESC""",
@@ -121,7 +121,8 @@ def get_member(member_id: uuid.UUID, request: Request,
     return {"member_id": str(m["member_id"]), "pseudo_id": m["pseudo_id"],
             "birth_year": m["birth_year"], "job": m["job"], "status": m["status"],
             "withdrawn_at": _iso(m["withdrawn_at"]), "has_account": m["has_account"],
-            "consents": [{"consent_id": str(c["consent_id"]), "item": c["item"], "purpose": c["purpose"],
+            "consents": [{"consent_id": str(c["consent_id"]), "consent_label": f"C-{c['consent_no']}",
+                          "item": c["item"], "purpose": c["purpose"],
                           "counterpart_pseudo_id": c["counterpart_pseudo_id"],
                           "recipient_id": str(c["recipient_id"]) if c["recipient_id"] else None,
                           "expires_at": _iso(c["expires_at"]), "revoked_at": _iso(c["revoked_at"]),
@@ -221,8 +222,12 @@ def request_introduction(member_id: uuid.UUID, body: IntroductionIn, request: Re
                "introduction": f"{_age_band(m['birth_year'])} {job} 회원입니다. "
                                f"증빙 서류 {'확인 완료' if verified else '확인 전'}."}
     data = json.dumps(profile, ensure_ascii=False).encode("utf-8")
+    with db.connection() as conn:
+        seq = conn.execute("SELECT coalesce(max(seq), 0) + 1 AS n FROM intro_files WHERE member_id = %s",
+                           (member_id,)).fetchone()["n"]
+    label = f"{m['pseudo_id']}_file{seq}"                      # 화면용 이름 (예: M-001_file1)
     up = transfer_client.call(request, "POST", "/api/transfer-files",
-                              files={"file": ("introduction.json", data, "application/json")})
+                              files={"file": (f"{label}.json", data, "application/json")})
     if up.status_code != 201:
         audit.deny(request, f"transfer_status_{up.status_code}")
         return transfer_client.relay(up)
@@ -235,8 +240,13 @@ def request_introduction(member_id: uuid.UUID, body: IntroductionIn, request: Re
     if req.status_code != 201:
         audit.deny(request, f"transfer_status_{req.status_code}")
         return transfer_client.relay(req)
-    audit.allow(request, target_type="export_request", target_id=req.json().get("request_id"))
-    return {**req.json(), "file_id": file_id, "profile": profile}
+    request_id = req.json()["request_id"]
+    with db.connection() as conn:
+        conn.execute("""INSERT INTO intro_files (label, member_id, seq, consent_id, file_id, request_id, created_by)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                     (label, member_id, seq, c["consent_id"], file_id, request_id, principal.user_id))
+    audit.allow(request, target_type="export_request", target_id=request_id)
+    return {**req.json(), "label": label, "file_id": file_id, "profile": profile}
 
 
 # ======================================================================
@@ -475,7 +485,7 @@ def my_consents(request: Request, member: Principal = Depends(member_via_transfe
     owner = _member_of(member.user_id)
     with db.connection() as conn:
         items = conn.execute(
-            """SELECT c.consent_id, cm.pseudo_id, c.item, c.purpose, c.expires_at, c.revoked_at
+            """SELECT c.consent_id, c.consent_no, cm.pseudo_id, c.item, c.purpose, c.expires_at, c.revoked_at
                  FROM consents c JOIN members cm ON cm.member_id = c.counterpart_member_id
                 WHERE c.member_id = %s ORDER BY c.granted_at DESC""", (owner["member_id"],)).fetchall()
         counterparts = conn.execute(
@@ -483,7 +493,8 @@ def my_consents(request: Request, member: Principal = Depends(member_via_transfe
                  JOIN members cm ON cm.member_id = i.counterpart_member_id
                 WHERE i.member_id = %s AND cm.status = 'active' ORDER BY cm.pseudo_id""", (owner["member_id"],)).fetchall()
     audit.allow(request, target_type="consent_list")
-    return {"items": [{"consent_id": str(c["consent_id"]), "counterpart_pseudo_id": c["pseudo_id"],
+    return {"items": [{"consent_id": str(c["consent_id"]), "consent_label": f"C-{c['consent_no']}",
+                       "counterpart_pseudo_id": c["pseudo_id"],
                        "item": c["item"], "purpose": c["purpose"], "expires_at": _iso(c["expires_at"]),
                        "revoked_at": _iso(c["revoked_at"])} for c in items],
             "counterparts": [{"counterpart_member_id": str(c["member_id"]),

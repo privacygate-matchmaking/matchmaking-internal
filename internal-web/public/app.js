@@ -191,8 +191,8 @@ function alertInline(node, text) { node.textContent = text; node.hidden = false;
 async function loadRequests() {
   const { items } = await getJson("/api/export-requests");
   fill("requests-body", "requests-empty", items.map((r) =>
-    row([mono(short(r.request_id)), mono(short(r.file_id)), r.purpose, pill(r.request_status),
-         toKst(r.expires_at), toKst(r.created_at)])));
+    row([r.label || mono(short(r.request_id)), r.recipient_pseudo_id || mono(short(r.recipient_id)), r.purpose,
+         pill(r.request_status), toKst(r.expires_at), toKst(r.created_at)])));
 }
 
 // 매칭 동의로 소개 자료 발송 요청: 자료는 서버가 회원 DB 로 만든다
@@ -201,7 +201,7 @@ async function requestIntroduction(m, c) {
   const res = await api(`/api/members/${m.member_id}/introductions`, { method: "POST", json: { consent_id: c.consent_id } });
   if (!res.ok) { showResult(out, await describe(res), false); out.scrollIntoView({ block: "nearest" }); return; }
   const r = await res.json();
-  showResult(out, `${m.pseudo_id} → ${c.counterpart_pseudo_id} 발송 요청 완료 (승인 대기) · 신청 ${short(r.request_id)} · "${r.profile.introduction}"`, true);
+  showResult(out, `${m.pseudo_id} → ${c.counterpart_pseudo_id} 발송 요청 완료 (승인 대기) · ${r.label} · "${r.profile.introduction}"`, true);
   out.scrollIntoView({ block: "nearest" });
   loadRequests();
 }
@@ -326,10 +326,12 @@ function renderApprovals() {
   const items = state.requests.filter((r) => !want || want.includes(r.request_status));
   fill("approvals-body", "approvals-empty", items.map((r) => {
     const mine = r.requester_id === state.me.user_id;
-    const tr = row([mono(short(r.request_id)), who(r.requester_pseudo_id, r.requester_id),
+    const btns = [button(r.request_status === "pending" && !mine ? "심사" : "상세", () => showRequest(r.request_id))];
+    if (r.request_status === "approved" && (r.label || r.approval_id))
+      btns.push(button("회수", () => revoke(r.label, r.approval_id), "btn sm danger"));
+    const tr = row([r.label || mono(short(r.request_id)), who(r.requester_pseudo_id, r.requester_id),
                     who(r.recipient_pseudo_id, r.recipient_id), r.purpose,
-                    pill(r.request_status), toKst(r.expires_at),
-                    actions(button(r.request_status === "pending" && !mine ? "심사" : "상세", () => showRequest(r.request_id)))]);
+                    pill(r.request_status), toKst(r.expires_at), actions(...btns)]);
     tr.dataset.id = r.request_id;
     return tr;
   }));
@@ -347,17 +349,17 @@ async function showRequest(id) {
   const r = await res.json();
   for (const tr of $("approvals-body").children) tr.classList.toggle("selected", tr.dataset.id === id);
   const mine = r.requester_id === state.me.user_id;
-  $("detail-title").textContent = `신청 ${short(r.request_id)}`;
+  $("detail-title").textContent = r.label ? `소개 자료 ${r.label}` : `신청 ${short(r.request_id)}`;
   $("detail-status").replaceChildren(pill(r.request_status));
   const facts = $("detail-facts");
   facts.replaceChildren();
-  fact(facts, "신청 ID", r.request_id, "mono");
+  fact(facts, "자료 이름", r.label || short(r.request_id));
   fact(facts, "신청 직원", (r.requester_pseudo_id || r.requester_id) + (mine ? " (본인)" : ""));
   fact(facts, "자료 주인 회원", r.member_pseudo_id || r.member_id);
   fact(facts, "받는 회원", r.recipient_pseudo_id || r.recipient_id);
-  fact(facts, "동의 ID", r.consent_id, "mono");
+  fact(facts, "동의", r.consent_label || short(r.consent_id));
   fact(facts, "목적", r.purpose);
-  fact(facts, "파일", `${r.file_id} (v${r.file_version})`, "mono");
+  fact(facts, "파일", r.label ? `${r.label}.json (v${r.file_version})` : `${short(r.file_id)} (v${r.file_version})`);
   fact(facts, "파일 해시", r.file_hash, "mono");
   fact(facts, "파일 검사", STATUS[r.scan_status]?.[0] || r.scan_status);
   fact(facts, "제공 기한", toKst(r.expires_at));
@@ -385,16 +387,19 @@ async function decide(id, action) {
   const res = await api(`/api/export-requests/${id}/${action}`, { method: "POST", json: {} });
   if (!res.ok) return showResult($("approvals-result"), await describe(res), false);
   const r = await res.json();
-  if (r.approval_id) $("revoke-id").value = r.approval_id;
+  if (r.approval_id) $("revoke-id").value = state.requests.find((x) => x.request_id === id)?.label || "";
   $("request-detail").hidden = true;
   showResult($("approvals-result"),
-    action === "approve" ? `승인 완료 · approval_id ${r.approval_id} (회수할 때 필요)` : "거절 완료", true);
+    action === "approve" ? "승인 완료 · 받는 회원이 외부 화면에서 내려받을 수 있습니다" : "거절 완료", true);
   loadApprovals();
 }
 
-async function revoke(approvalId) {
-  const res = await api(`/api/approvals/${encodeURIComponent(approvalId)}/revoke`, { method: "POST", json: {} });
-  showResult($("approvals-result"), res.ok ? "회수 완료 · 수신자는 더 이상 내려받을 수 없습니다" : await describe(res), res.ok);
+async function revoke(label, approvalId) {
+  // 소개 자료 이름(M-001_file1)으로 회수. 이름이 없는 예전 건만 approval_id 로
+  const res = label
+    ? await api("/api/approvals/revoke-by-label", { method: "POST", json: { label } })
+    : await api(`/api/approvals/${encodeURIComponent(approvalId)}/revoke`, { method: "POST", json: {} });
+  showResult($("approvals-result"), res.ok ? `회수 완료 (${label || short(approvalId)}) · 받는 회원은 더 이상 내려받을 수 없습니다` : await describe(res), res.ok);
   loadApprovals();
 }
 

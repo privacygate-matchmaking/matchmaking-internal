@@ -95,7 +95,7 @@
             <div class="section-title"><h2>내 발송 신청 내역</h2></div>
             <div class="tablewrap">
               <table>
-                <thead><tr><th>신청 ID</th><th>파일</th><th>목적</th><th>상태</th><th>제공 기한</th><th>신청 시각</th></tr></thead>
+                <thead><tr><th>소개 자료</th><th>받는 회원</th><th>목적</th><th>상태</th><th>제공 기한</th><th>신청 시각</th></tr></thead>
                 <tbody id="requests-body"></tbody>
               </table>
               <div class="empty" id="requests-empty" hidden>신청 내역이 없습니다.</div>
@@ -189,7 +189,7 @@
           </div>
           <div class="tablewrap">
             <table>
-              <thead><tr><th>신청 ID</th><th>신청 직원</th><th>받는 회원</th><th>목적</th><th>상태</th><th>제공 기한</th><th>관리</th></tr></thead>
+              <thead><tr><th>소개 자료</th><th>신청 직원</th><th>받는 회원</th><th>목적</th><th>상태</th><th>제공 기한</th><th>관리</th></tr></thead>
               <tbody id="approvals-body"></tbody>
             </table>
             <div class="empty" id="approvals-empty" hidden>신청 내역이 없습니다.</div>
@@ -206,9 +206,9 @@
 
           <div class="card mt16">
             <h3>승인 회수</h3>
-            <p class="muted">승인 후 받은 approval_id 로 회수합니다. 회수하면 수신자는 더 이상 내려받을 수 없습니다.</p>
+            <p class="muted">소개 자료 이름(예: M-001_file1)으로 회수합니다. 목록의 [회수] 버튼을 눌러도 됩니다. 회수하면 받는 회원은 더 이상 내려받을 수 없습니다.</p>
             <form class="form inline" id="revoke-form">
-              <label>approval_id<input type="text" name="approval_id" id="revoke-id" required pattern="[0-9a-fA-F-]{36}"></label>
+              <label>소개 자료 이름<input type="text" name="label" id="revoke-id" required placeholder="M-001_file1" pattern="[A-Za-z0-9-]{1,32}_file[0-9]{1,6}"></label>
               <div><button type="submit" class="btn danger">회수</button></div>
             </form>
           </div>

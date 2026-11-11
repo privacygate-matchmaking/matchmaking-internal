@@ -46,6 +46,7 @@ EXPECTED = {
     ("POST", "/api/export-requests/{request_id}/approve"): "roles:approver",
     ("POST", "/api/export-requests/{request_id}/reject"): "roles:approver",
     ("POST", "/api/approvals/{approval_id}/revoke"): "roles:approver",
+    ("POST", "/api/approvals/revoke-by-label"): "roles:approver",   # 소개 자료 이름으로 회수 (명세 외 추가)
 }
 
 
