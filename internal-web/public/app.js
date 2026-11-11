@@ -156,12 +156,17 @@ function memberStatus(m) {
   const days = Math.max(0, Math.ceil((new Date(m.withdraw_at) - Date.now()) / 86400000));
   const d = el("div");
   d.append(p, el("span", `D-${days} · ${new Date(m.withdraw_at).toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul" })} 삭제`, "sub-code"));
+  if (m.withdraw_reason) { const r = el("span", `사유: ${m.withdraw_reason}`, "sub-code"); r.title = m.withdraw_reason; d.append(r); }
   return d;
 }
 
 // 확인 팝업: choices = [{label, value, cls}] → 고른 value (취소·Esc 는 null)
-function ask(title, message, choices, eyebrow = "CONFIRM") {
+// input = "입력칸 이름" 을 주면 선택 입력칸을 보여 주고, 입력값은 state.askText 에 담는다
+function ask(title, message, choices, eyebrow = "CONFIRM", input = null) {
   const dlg = $("confirm-dialog");
+  $("confirm-input-wrap").hidden = !input;
+  $("confirm-input").value = "";
+  if (input) $("confirm-input-label").textContent = input;
   $("confirm-eyebrow").textContent = eyebrow;
   $("confirm-title").textContent = title;
   $("confirm-message").textContent = message;
@@ -172,7 +177,7 @@ function ask(title, message, choices, eyebrow = "CONFIRM") {
     return b;
   }));
   return new Promise((resolve) => {
-    dlg.onclose = () => resolve(dlg.returnValue || null);
+    dlg.onclose = () => { state.askText = $("confirm-input").value.trim(); resolve(dlg.returnValue || null); };
     dlg.returnValue = "";
     dlg.showModal();
   });
@@ -268,6 +273,10 @@ async function showMember(memberId) {
   fact(f, "학력", `${m.education_level ?? "-"}${m.school ? ` · ${m.school}` : ""}${m.major ? ` ${m.major}` : ""}  [학력 증빙 ${m.education_verified ? "통과" : "미확인 — 매칭 불가"}]`);
   fact(f, "직군 · 직장", `${m.job_group ?? "-"}${m.company ? ` · ${m.company}` : ""}  [재직 증빙 ${m.employment_verified ? "통과 — 직장 공개" : "미확인 — 직장 비공개"}]`);
   fact(f, "소개", m.introduction ?? "-", "long");
+  if (m.status === "withdraw_pending") {
+    fact(f, "탈퇴 요청", `${m.withdraw_by ?? "-"}${m.withdraw_by_role === "data_admin" ? " (총관리자)" : ""} · ${toKst(m.withdraw_requested_at)} → ${toKst(m.withdraw_at)} 삭제 예정`);
+    fact(f, "탈퇴 사유", m.withdraw_reason || "(입력 안 함)", "long");
+  }
   const yes = (v) => el("span", v ? "매칭함" : "-", v ? "pill" : "muted");
   fill("matches-body", "matches-empty", m.matches.map((x) =>
     row([withName(x.counterpart_pseudo_id, x.counterpart_name), yes(x.i_matched), yes(x.they_matched),
@@ -332,8 +341,7 @@ function renderManage() {
                 `${m.job_group ?? "-"}${m.company ? ` · ${m.company}` : ""}`, ev, m.counselors || "미배정", memberStatus(m),
                 active ? actions(button("수정", () => openEdit(m)),
                                  button("탈퇴", () => withdraw(m), "btn sm danger"))
-                       : actions(button("탈퇴 철회", () => cancelWithdraw(m)),
-                                 button("즉시 탈퇴", () => withdrawNow(m), "btn sm danger"))]);
+                       : pendingActions(m)]);
   }));
 }
 
@@ -366,17 +374,26 @@ async function saveEdit(ev) {
   if (res.ok) { $("edit-card").hidden = true; loadManage(); }
 }
 
+// 탈퇴 예정 회원의 버튼: 총관리자 → 철회·즉시 탈퇴 / 상담 직원 → 본인 쪽 요청만 철회 (총관리자 요청은 안내만)
+function pendingActions(m) {
+  if (state.me.role === "data_admin")
+    return actions(button("탈퇴 철회", () => cancelWithdraw(m)), button("즉시 탈퇴", () => withdrawNow(m), "btn sm danger"));
+  if (m.withdraw_by_role === "data_admin") return el("span", "총관리자가 탈퇴 요청함", "pill amber");
+  return actions(button("탈퇴 철회", () => cancelWithdraw(m)));
+}
+
 const who2 = (m) => `${m.pseudo_id} ${m.name ?? ""}`.trim();
 
 // 탈퇴: 1) 확인 팝업 → 2) 한 번 더 확인 → 탈퇴 예정(7일 유예). 즉시 탈퇴·철회는 탈퇴 예정 줄의 버튼으로
 async function withdraw(m) {
   const first = await ask("회원 탈퇴", `${who2(m)} 회원을 탈퇴시키겠습니까?`, [
-    { label: "확인", value: "yes", cls: "primary" }, { label: "취소", value: null }], "WITHDRAW");
+    { label: "확인", value: "yes", cls: "primary" }, { label: "취소", value: null }], "WITHDRAW", "탈퇴 사유 (선택, 200자 이내)");
   if (first !== "yes") return;
+  const reason = state.askText;
   const ok = await ask("다시 확인", `${who2(m)} 회원은 탈퇴 예정 상태가 됩니다. 7일 동안 매칭·자료 제공이 멈추고, 그 사이 탈퇴를 철회하거나 즉시 탈퇴할 수 있습니다. 7일이 지나면 회원 정보가 DB에서 삭제됩니다.`, [
     { label: "확인", value: "yes", cls: "danger" }, { label: "취소", value: null }], "CONFIRM");
   if (ok !== "yes") return;
-  await doWithdraw(m, "scheduled");
+  await doWithdraw(m, "scheduled", reason);
 }
 
 // 탈퇴 예정 회원을 기한 전에 바로 삭제
@@ -390,8 +407,8 @@ async function withdrawNow(m) {
   await doWithdraw(m, "immediate");
 }
 
-async function doWithdraw(m, mode) {
-  const res = await api(`/api/members/${m.member_id}/withdraw`, { method: "POST", json: { mode } });
+async function doWithdraw(m, mode, reason = "") {
+  const res = await api(`/api/members/${m.member_id}/withdraw`, { method: "POST", json: { mode, reason: reason || null } });
   if (!res.ok) return showResult($("manage-result"), await describe(res), false);
   const r = await res.json();
   showResult($("manage-result"), mode === "scheduled"

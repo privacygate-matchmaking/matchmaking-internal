@@ -182,3 +182,7 @@ dialog.confirm p{font-size:13px;line-height:1.75;color:#45526b;margin:0 0 22px;w
 dialog.confirm .actions{justify-content:flex-end;gap:8px}
 dialog.confirm .btn.danger{background:var(--red);border-color:var(--red);color:#fff}
 dialog.confirm .btn.danger:hover{background:#962f3c}
+dialog.confirm .confirm-input{display:block;margin:-6px 0 20px;font-size:12px;font-weight:600;color:#33415c}
+dialog.confirm textarea{display:block;width:100%;margin-top:7px;padding:10px 12px;border:1px solid #d6dce8;border-radius:3px;background:var(--bg,#fafbfd);font:inherit;font-size:13px;resize:vertical;box-sizing:border-box}
+dialog.confirm textarea:focus{outline:0;border-color:var(--blue);box-shadow:0 0 0 3px rgba(42,86,184,.15)}
+.tablewrap td .sub-code{max-width:220px;overflow:hidden;text-overflow:ellipsis}

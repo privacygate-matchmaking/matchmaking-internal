@@ -69,7 +69,9 @@ SCOPE_SQL = """(%(role)s = 'data_admin' OR EXISTS (SELECT 1 FROM assignments a
 # 직원 화면에 보이는 프로필 항목 (연락처는 넣지 않는다)
 PROFILE_COLS = """m.member_id, m.pseudo_id, m.name, m.gender, m.birth_date, m.height_cm, m.weight_kg,
                   m.education_level, m.school, m.major, m.job_group, m.company, m.introduction,
-                  m.education_verified, m.employment_verified, m.status, m.withdraw_requested_at, m.withdraw_at, m.created_at,
+                  m.education_verified, m.employment_verified, m.status, m.withdraw_requested_at, m.withdraw_at, m.withdraw_reason, m.created_at,
+                  (SELECT u.role FROM users u WHERE u.user_id = m.withdraw_requested_by) AS withdraw_by_role,
+                  (SELECT u.pseudo_id FROM users u WHERE u.user_id = m.withdraw_requested_by) AS withdraw_by,
                   (m.user_id IS NOT NULL) AS has_account"""
 
 
@@ -93,6 +95,8 @@ def _profile(r) -> dict:
             "job_group": r["job_group"], "company": r["company"], "introduction": r["introduction"],
             "education_verified": r["education_verified"], "employment_verified": r["employment_verified"],
             "status": r["status"], "withdraw_at": _iso(r["withdraw_at"]),
+            "withdraw_requested_at": _iso(r["withdraw_requested_at"]), "withdraw_reason": r["withdraw_reason"],
+            "withdraw_by": r["withdraw_by"], "withdraw_by_role": r["withdraw_by_role"],
             "has_account": r["has_account"], "created_at": _iso(r["created_at"])}
 
 
@@ -203,6 +207,7 @@ def update_member(member_id: uuid.UUID, body: MemberUpdateIn, request: Request,
 
 class WithdrawIn(BaseModel):
     mode: str = Field(default="scheduled", pattern="^(scheduled|immediate)$")
+    reason: str | None = Field(default=None, max_length=200)     # 탈퇴 사유 (선택)
 
 
 @router.post("/members/{member_id}/withdraw")
@@ -212,8 +217,12 @@ def withdraw_member(member_id: uuid.UUID, body: WithdrawIn, request: Request,
     """탈퇴 처리. ※ 명세 외 추가
     - scheduled: 탈퇴 예정(유예 7일). 그동안 회원 기능은 막히고(매칭·제공 불가) 직원이 철회할 수 있다.
       기한이 지나면 주기 작업이 회원 정보를 DB 에서 삭제한다.
-    - immediate: 바로 삭제 (유예 중인 회원도 가능). 회원·동의·매칭·증빙(파일 포함)·소개 자료 기록이 지워진다.
+    - immediate: 바로 삭제 (유예 중인 회원도 가능). 총관리자(data_admin)만. 회원·동의·매칭·증빙(파일 포함)·소개 자료 기록이 지워진다.
     삭제 범위는 DB 함수 purge_member 로 고정하며, 감사 로그(회원 코드)는 남긴다."""
+    # 즉시 탈퇴(바로 삭제)는 총관리자만
+    if body.mode == "immediate" and principal.role != Role.DATA_ADMIN.value:
+        raise GateError(ErrorCode.ACCESS_DENIED, "immediate_withdraw_admin_only")
+    reason = (body.reason or "").strip() or None
     with db.connection() as conn:
         m = _member_in_scope(conn, principal, member_id)
         if body.mode == "scheduled":
@@ -221,9 +230,10 @@ def withdraw_member(member_id: uuid.UUID, body: WithdrawIn, request: Request,
                 raise GateError(ErrorCode.INVALID_STATE, "already_withdraw_pending")
             row = conn.execute(
                 """UPDATE members SET status = 'withdraw_pending', withdraw_requested_at = now(),
-                          withdraw_at = now() + make_interval(days => %s)
+                          withdraw_at = now() + make_interval(days => %s),
+                          withdraw_requested_by = %s, withdraw_reason = %s
                     WHERE member_id = %s RETURNING withdraw_at""",
-                (WITHDRAW_GRACE_DAYS, member_id)).fetchone()
+                (WITHDRAW_GRACE_DAYS, principal.user_id, reason, member_id)).fetchone()
     if body.mode == "scheduled":
         audit.allow(request, target_type="member_withdraw_scheduled", target_id=m["pseudo_id"])
         return {"member_id": str(member_id), "status": "withdraw_pending", "withdraw_at": _iso(row["withdraw_at"])}
@@ -236,12 +246,15 @@ def withdraw_member(member_id: uuid.UUID, body: WithdrawIn, request: Request,
 def cancel_withdraw(member_id: uuid.UUID, request: Request,
                     principal: Principal = Depends(require(*MEMBER_ROLES)),
                     _csrf: None = Depends(require_csrf)):
-    """탈퇴 철회 (유예 기간 안에서만). ※ 명세 외 추가"""
+    """탈퇴 철회 (유예 기간 안에서만). 총관리자가 요청한 탈퇴는 총관리자만 철회할 수 있다. ※ 명세 외 추가"""
     with db.connection() as conn:
         m = _member_in_scope(conn, principal, member_id)
         if m["status"] != "withdraw_pending":
             raise GateError(ErrorCode.INVALID_STATE, "not_withdraw_pending")
-        conn.execute("""UPDATE members SET status = 'active', withdraw_requested_at = NULL, withdraw_at = NULL
+        if m["withdraw_by_role"] == Role.DATA_ADMIN.value and principal.role != Role.DATA_ADMIN.value:
+            raise GateError(ErrorCode.ACCESS_DENIED, "withdraw_requested_by_admin")
+        conn.execute("""UPDATE members SET status = 'active', withdraw_requested_at = NULL, withdraw_at = NULL,
+                               withdraw_requested_by = NULL, withdraw_reason = NULL
                          WHERE member_id = %s""", (member_id,))
     audit.allow(request, target_type="member_withdraw_cancelled", target_id=m["pseudo_id"])
     return {"member_id": str(member_id), "status": "active"}
