@@ -264,7 +264,7 @@ function alertInline(node, text) { node.textContent = text; node.hidden = false;
 async function loadRequests() {
   const { items } = await getJson("/api/export-requests");
   fill("requests-body", "requests-empty", items.map((r) =>
-    row([r.label || mono(short(r.request_id)), r.recipient_pseudo_id || mono(short(r.recipient_id)), r.purpose,
+    row([r.label || mono(short(r.request_id)), r.recipient_pseudo_id ? withName(r.recipient_pseudo_id, r.recipient_name) : mono(short(r.recipient_id)), r.purpose,
          pill(r.request_status), toKst(r.expires_at), toKst(r.created_at)])));
 }
 
@@ -426,7 +426,7 @@ function renderApprovals() {
     if (r.request_status === "approved" && (r.label || r.approval_id))
       btns.push(button("회수", () => revoke(r.label, r.approval_id), "btn sm danger"));
     const tr = row([r.label || mono(short(r.request_id)), who(r.requester_pseudo_id, r.requester_id),
-                    who(r.recipient_pseudo_id, r.recipient_id), r.purpose,
+                    who(r.recipient_pseudo_id && withName(r.recipient_pseudo_id, r.recipient_name), r.recipient_id), r.purpose,
                     pill(r.request_status), toKst(r.expires_at), actions(...btns)]);
     tr.dataset.id = r.request_id;
     return tr;
@@ -451,8 +451,8 @@ async function showRequest(id) {
   facts.replaceChildren();
   fact(facts, "자료 이름", r.label || short(r.request_id));
   fact(facts, "신청 직원", (r.requester_pseudo_id || r.requester_id) + (mine ? " (본인)" : ""));
-  fact(facts, "자료 주인 회원", r.member_pseudo_id || r.member_id);
-  fact(facts, "받는 회원", r.recipient_pseudo_id || r.recipient_id);
+  fact(facts, "자료 주인 회원", r.member_pseudo_id ? withName(r.member_pseudo_id, r.member_name) : r.member_id);
+  fact(facts, "받는 회원", r.recipient_pseudo_id ? withName(r.recipient_pseudo_id, r.recipient_name) : r.recipient_id);
   fact(facts, "동의", r.consent_label || short(r.consent_id));
   fact(facts, "목적", r.purpose);
   fact(facts, "파일", r.label ? `${r.label}.json (v${r.file_version})` : `${short(r.file_id)} (v${r.file_version})`);

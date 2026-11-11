@@ -117,16 +117,22 @@ def _with_pseudo_ids(items: list[dict]) -> None:
     if not ids:
         return
     with db.connection() as conn:
+        # 직원은 표시 이름 없이 코드만, 회원(회원 행 또는 회원 로그인 계정)은 코드 + 이름
         rows = conn.execute(
-            """SELECT user_id::text AS id, pseudo_id FROM users WHERE user_id::text = ANY(%(ids)s)
+            """SELECT u.user_id::text AS id, u.pseudo_id, m.name
+                 FROM users u LEFT JOIN members m ON m.user_id = u.user_id
+                WHERE u.user_id::text = ANY(%(ids)s)
                UNION ALL
-               SELECT member_id::text, pseudo_id FROM members WHERE member_id::text = ANY(%(ids)s)""",
+               SELECT member_id::text, pseudo_id, name FROM members WHERE member_id::text = ANY(%(ids)s)""",
             {"ids": list(ids)}).fetchall()
-    names = {r["id"]: r["pseudo_id"] for r in rows}
+    found = {r["id"]: r for r in rows}
     for it in items:
         for k in ("requester_id", "recipient_id", "member_id"):
-            if it.get(k) and str(it[k]) in names:
-                it[k.replace("_id", "_pseudo_id")] = names[str(it[k])]
+            r = found.get(str(it.get(k))) if it.get(k) else None
+            if r:
+                it[k.replace("_id", "_pseudo_id")] = r["pseudo_id"]
+                if r["name"]:
+                    it[k.replace("_id", "_name")] = r["name"]
 
 
 def _decide(request: Request, path: str, target: str):
