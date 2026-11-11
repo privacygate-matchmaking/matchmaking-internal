@@ -25,6 +25,8 @@ Keycloak client: `internal-web`, `external-web` · 쿠키: `internal_session`, `
 | GET | /api/members | counselor | 담당 회원 목록 (허용 항목만) |
 | GET | /api/members/{member_id} | counselor | 담당 회원 상세. 담당이 아니면 404 |
 | POST | /api/admin/member-exports | data_admin | 전체 회원 내보내기 (공격 ① 대상). 결과 파일은 서버 내부에만 두고 `export_id`·건수만 응답 (내려받기 경로 없음) |
+| GET | /api/admin/members | data_admin (총관리자) | 전체 회원 목록 (가명 ID·출생연도·직업·담당 직원·유효 동의 수·외부 계정 여부, 이름·연락처 제외) ※명세 외 추가 |
+| GET | /api/admin/member-exports | data_admin (총관리자) | 전체 회원 내보내기 내역 (실행 직원·건수·중계 등록 여부, 파일 내용 없음) ※명세 외 추가 |
 | POST | /api/member-exports/{export_id}/transfer-files | counselor (본인이 만든 내보내기만) | 내보내기 파일 바이트를 internal-api 가 중계 `POST /api/transfer-files` 에 multipart 로 등록 (공격 연결 단계) ※명세 외 추가 |
 | POST | /api/evidence-files | 서비스: transfer-api + 회원 토큰 | **회원** 증빙 제출 (multipart PDF, 최대 2MiB) → AES-GCM 암호화 후 evidence-storage. 201 `{file_id, status}` (직원은 제출 불가) |
 | GET | /api/evidence-files | data_admin | 나에게 배정된 증빙 목록 (file_id, 회원 가명 ID, 접수일, 상태, 삭제 기한, 원본 내용 없음) ※명세 외 추가 |
@@ -82,6 +84,8 @@ external-api 에는 업무 DB·증빙 저장소 접근 권한이 없다.
 |---|---|
 | `GET /api/members` | → `{"items": [{member_id, pseudo_id, birth_year, job}]}` (담당 회원만) |
 | `GET /api/members/{member_id}` | → `{member_id, pseudo_id, birth_year, job, consents: [{consent_id, item, purpose, counterpart_pseudo_id, recipient_id, expires_at, revoked_at, valid}]}`. 담당 아니면 404 |
+| `GET /api/admin/members` | → `{"items": [{member_id, pseudo_id, birth_year, job, has_account, counselors, valid_consents, created_at}]}` |
+| `GET /api/admin/member-exports` | → `{"items": [{export_id, created_by, created_by_role, row_count, transfer_file_id, created_at}]}` (최근 50건) |
 | `POST /api/admin/member-exports` | `{}` → 201 `{export_id, row_count, created_at}` (파일은 evidence-storage/exports 에 암호문) |
 | `POST /api/member-exports/{export_id}/transfer-files` | `{}` → 중계 응답 그대로 (`{file_id, scan_status, export_banned, ...}`). 이미 등록했으면 409 |
 | `GET /api/evidence-files` | → `{"items": [{file_id, member_pseudo_id, status, review_result, created_at, delete_after, legal_hold}]}` |

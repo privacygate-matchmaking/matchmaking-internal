@@ -124,3 +124,28 @@ footer span:last-child{margin-left:auto}
   .overview>div+div{padding-left:16px}.tabs{gap:18px;overflow-x:auto}.tab{font-size:13px;white-space:nowrap}
   .page-heading h1{font-size:24px}footer{flex-wrap:wrap;padding:22px 16px}footer span:last-child{margin-left:0}
 }
+
+/* 섹션·통계·상세 */
+.section-title{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin:34px 0 0;flex-wrap:wrap}
+.section-title:first-child{margin-top:0}
+.section-title h2{font-size:17px;margin:0}
+.section-title .muted{font-size:12px}
+.card h3{font-size:15px;font-weight:600;margin:0 0 6px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--border);background:#fff;margin-top:22px}
+.stats>div{padding:18px 24px}.stats>div+div{border-left:1px solid var(--border)}
+.stats strong{font-family:Georgia,serif;font-size:30px;font-weight:400;line-height:1.2}
+.row-between{display:flex;align-items:center;justify-content:space-between;gap:20px}
+.row-between .muted{margin:0}
+.row-between .btn{white-space:nowrap}
+.filters{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:1px solid #d3dbe9;background:#fff;color:#4a5670;border-radius:20px;padding:4px 12px;font-size:12px}
+.chip.active{background:var(--navy);border-color:var(--navy);color:#fff}
+.facts{display:grid;grid-template-columns:130px 1fr;gap:8px 16px;margin:14px 0 22px;font-size:13px}
+.facts dt{color:var(--muted);font-size:12px}
+.facts dd{margin:0;word-break:break-all}
+.facts dd.long{white-space:pre-wrap;line-height:1.7}
+details.sub summary{cursor:pointer;font-weight:600;font-size:14px}
+details.sub[open] summary{margin-bottom:10px}
+tr.selected td{background:#eef3ff}
+@media(max-width:650px){.stats{grid-template-columns:1fr 1fr}.stats>div:nth-child(3){border-left:0}.facts{grid-template-columns:1fr}.row-between{flex-direction:column;align-items:flex-start}}
+.section-title+.card,.section-title+.two{margin-top:14px}

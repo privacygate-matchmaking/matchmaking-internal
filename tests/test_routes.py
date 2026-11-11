@@ -22,6 +22,8 @@ EXPECTED = {
     ("GET", "/api/members"): "roles:counselor",
     ("GET", "/api/members/{member_id}"): "roles:counselor",
     ("POST", "/api/admin/member-exports"): "roles:data_admin",
+    ("GET", "/api/admin/members"): "roles:data_admin",          # 총관리자 회원 관리 (명세 외 추가)
+    ("GET", "/api/admin/member-exports"): "roles:data_admin",   # 내보내기 내역 (명세 외 추가)
     ("POST", "/api/evidence-files"): "service:transfer-api",   # 회원 제출, 중계 경유
     ("GET", "/api/evidence-files"): "roles:data_admin",        # 배정된 증빙 목록 (명세 외 추가)
     ("GET", "/api/internal/my-evidence-files"): "service:transfer-api",            # 명세 외 추가

@@ -133,6 +133,41 @@ def create_member_export(request: Request,
     return {"export_id": str(export_id), "row_count": len(rows), "created_at": _iso(row["created_at"])}
 
 
+@router.get("/admin/members")
+def admin_list_members(request: Request, principal: Principal = Depends(require(Role.DATA_ADMIN))):
+    """총관리자(data_admin) 회원 관리 목록: 전체 회원의 허용 항목 + 담당 직원. 이름·연락처는 주지 않는다. ※ 명세 외 추가"""
+    with db.connection() as conn:
+        rows = conn.execute(
+            """SELECT m.member_id, m.pseudo_id, m.birth_year, m.job, m.created_at,
+                      (m.user_id IS NOT NULL) AS has_account,
+                      (SELECT string_agg(u.pseudo_id || ' ' || u.display_name, ', ' ORDER BY u.pseudo_id)
+                         FROM assignments a JOIN users u ON u.user_id = a.user_id
+                        WHERE a.member_id = m.member_id) AS counselors,
+                      (SELECT count(*) FROM consents c
+                        WHERE c.member_id = m.member_id AND c.revoked_at IS NULL AND c.expires_at > now()) AS valid_consents
+                 FROM members m ORDER BY m.pseudo_id""").fetchall()
+    audit.allow(request, target_type="member_list_all")
+    return {"items": [{"member_id": str(r["member_id"]), "pseudo_id": r["pseudo_id"],
+                       "birth_year": r["birth_year"], "job": r["job"], "has_account": r["has_account"],
+                       "counselors": r["counselors"], "valid_consents": r["valid_consents"],
+                       "created_at": _iso(r["created_at"])} for r in rows]}
+
+
+@router.get("/admin/member-exports")
+def admin_list_exports(request: Request, principal: Principal = Depends(require(Role.DATA_ADMIN))):
+    """전체 회원 내보내기 내역 (파일 내용 없음). 이상 내보내기 확인용. ※ 명세 외 추가"""
+    with db.connection() as conn:
+        rows = conn.execute(
+            """SELECT e.export_id, u.pseudo_id, u.role, e.row_count, e.transfer_file_id, e.created_at
+                 FROM member_exports e JOIN users u ON u.user_id = e.created_by
+                ORDER BY e.created_at DESC LIMIT 50""").fetchall()
+    audit.allow(request, target_type="member_export_list")
+    return {"items": [{"export_id": str(r["export_id"]), "created_by": r["pseudo_id"], "created_by_role": r["role"],
+                       "row_count": r["row_count"],
+                       "transfer_file_id": str(r["transfer_file_id"]) if r["transfer_file_id"] else None,
+                       "created_at": _iso(r["created_at"])} for r in rows]}
+
+
 @router.post("/member-exports/{export_id}/transfer-files", status_code=201)
 def register_export_to_transfer(export_id: uuid.UUID, request: Request,
                                 principal: Principal = Depends(require(Role.COUNSELOR)),

@@ -59,7 +59,11 @@ def call(request: Request, method: str, path: str, *, json: dict | None = None,
 
 
 def relay(resp: httpx.Response) -> Response:
-    """중계 응답(성공·공통 오류 형식)을 그대로 돌려준다."""
+    """중계 응답(성공·공통 오류 형식)을 그대로 돌려준다.
+    단, 중계가 직원 토큰을 거절한 401 은 브라우저 세션 만료가 아니므로 그대로 넘기지 않는다
+    (넘기면 화면이 로그인 화면으로 돌아간다). 내부 오류로 바꾸고 사유를 감사 로그에 남긴다."""
+    if resp.status_code == 401:
+        raise GateError(ErrorCode.INTERNAL_ERROR, "transfer_rejected_staff_token")
     ctype = resp.headers.get("content-type", "")
     if ctype.startswith("application/json"):
         return JSONResponse(resp.json(), status_code=resp.status_code)
