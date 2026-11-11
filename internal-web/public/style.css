@@ -150,3 +150,8 @@ tr.selected td{background:#eef3ff}
 @media(max-width:650px){.stats{grid-template-columns:1fr 1fr}.stats>div:nth-child(3){border-left:0}.facts{grid-template-columns:1fr}.row-between{flex-direction:column;align-items:flex-start}}
 .section-title+.card,.section-title+.two{margin-top:14px}
 .form.edit{grid-template-columns:1fr 2fr auto;align-items:end;gap:12px}.form.edit .actions{margin-top:0}.form.edit .btn{margin-top:0}@media(max-width:650px){.form.edit{grid-template-columns:1fr}}
+
+.form.grid3{grid-template-columns:repeat(3,1fr);gap:4px 14px}.form.grid3 .span-all{grid-column:1/-1}.form.grid3 .actions{margin-top:14px}.form.grid3 .btn{margin-top:0}
+.sub-code{display:block;font-size:11px;color:var(--muted)}.ok-mark{color:var(--green);font-weight:700;margin-left:4px}
+@media(max-width:800px){.form.grid3{grid-template-columns:1fr}}
+.pill.off{background:#f1f3f7;color:#8a93a5}

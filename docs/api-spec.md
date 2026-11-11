@@ -85,12 +85,12 @@ external-api 에는 업무 DB·증빙 저장소 접근 권한이 없다.
 | 경로 | 입력 → 응답 |
 |---|---|
 | `GET /api/members/{member_id}` | → `{member_id, pseudo_id, birth_year, job, consents: [{consent_id, item, purpose, counterpart_pseudo_id, recipient_id, expires_at, revoked_at, valid}]}`. 담당 아니면 404 |
-| `GET /api/members` | → `{"items": [{member_id, pseudo_id, birth_year, job, status, has_account, counselors, valid_consents, open_evidence, created_at}]}` (counselor: 담당 회원, data_admin: 전체) |
-| `PATCH /api/members/{member_id}` | `{birth_year?, job?}` → `{member_id, birth_year, job}` |
+| `GET /api/members` | → `{"items": [{member_id, pseudo_id, nickname, birth_date, age, height_cm, weight_kg, education_level, school, major, job_group, company, introduction, education_verified, employment_verified, status, has_account, counselors, valid_consents, open_evidence, created_at}]}` (실명·연락처 제외. counselor: 담당 회원, data_admin: 전체) |
+| `PATCH /api/members/{member_id}` | `{nickname?, birth_date?, height_cm?, weight_kg?, education_level?, school?, major?, job_group?, company?, introduction?}` → 회원 프로필. 학력 항목 변경 시 `education_verified=false`, 직장 변경 시 `employment_verified=false` |
 | `POST /api/members/{member_id}/introductions` | `{consent_id}` → 201 `{request_id, request_status, created_at, label, file_id, profile}` (label = 화면용 이름 `M-001_file1`, 중계 파일 이름도 같음) (profile = 중계에 보낸 소개 JSON) |
 | `POST /api/members/{member_id}/withdraw` | `{}` → `{member_id, status: "withdrawn", revoked_consents}` |
-| `GET /api/internal/my-matches` | → `{"items": [{counterpart_member_id, counterpart_pseudo_id, i_matched, they_matched, matched, matched_at}]}` (소개된 상대만) |
-| `POST /api/internal/my-matches` | `{counterpart_member_id}` → 201 `{counterpart_member_id, matched}`. 서로 누르면 양쪽 프로필 제공 동의(item=profile, purpose=introduction, 30일) 자동 생성 |
+| `GET /api/internal/my-matches` | → `{"can_match": bool, "items": [{counterpart_member_id, counterpart_pseudo_id, card: {nickname, age, height_cm, weight_kg, education_level, education_verified, job_group, introduction}, i_matched, they_matched, matched, matched_at}]}` (card = 매칭 전 공개 정보. can_match = 내 학력 증빙 통과 여부) |
+| `POST /api/internal/my-matches` | `{counterpart_member_id}` → 201 `{counterpart_member_id, matched}`. 학력 증빙 미통과면 409 `education_not_verified`. 서로 누르면 양쪽 프로필 제공 동의(item=profile, purpose=introduction, 30일) 자동 생성 |
 | `POST /api/internal/my-matches/{counterpart_member_id}/cancel` | `{}` → `{counterpart_member_id, cancelled, revoked_consents}`. 매칭으로 만든 양쪽 동의 철회 |
 | `GET /api/admin/member-exports` | → `{"items": [{export_id, created_by, created_by_role, row_count, transfer_file_id, created_at}]}` (최근 50건) |
 | `POST /api/admin/member-exports` | `{}` → 201 `{export_id, row_count, created_at}` (파일은 evidence-storage/exports 에 암호문) |
@@ -99,7 +99,7 @@ external-api 에는 업무 DB·증빙 저장소 접근 권한이 없다.
 | `GET /api/evidence-files/{file_id}/content` | → `application/pdf` (no-store, sandbox CSP). submitted → in_review 로 바뀜 |
 | `POST /api/evidence-files/{file_id}/review` | `{"result": "passed"\|"rejected"}` → `{file_id, status: "reviewed", review_result, delete_after}` (삭제 기한 +7일) |
 | `POST /api/internal/disclosure-checks` | `{member_id, recipient_id, consent_id, purpose, item}` → 허용 `{"allowed": true, "expires_at", "member_pseudo_id"}`, 거부 `{"allowed": false}` 또는 공통 403. 조회 실패·미구현을 허용으로 해석하지 않음. 신청·승인·다운로드마다 재호출 |
-| `POST /api/evidence-files` | multipart PDF(≤2MiB) → 201 `{file_id, status}` |
+| `POST /api/evidence-files` | multipart `file`(PDF ≤2MiB) + `kind`(`education`=졸업증명서 / `employment`=재직증명서, 생략 시 education) → 201 `{file_id, kind, status}`. 통과 시 학력 → 매칭 가능, 재직 → 소개 자료에 직장 포함 |
 | `GET /api/internal/my-evidence-files` | → `{"items": [{file_id, status, created_at, review_result?}]}` (status: submitted / in_review / reviewed / deleted) |
 | `GET /api/internal/my-consents` | → `{"items": [{consent_id, counterpart_pseudo_id, item, purpose, expires_at, revoked_at}], "counterparts": [{counterpart_member_id, counterpart_pseudo_id}]}` (counterparts = 소개된 상대만, `introductions` 테이블) |
 | `POST /api/internal/my-consents` | `{counterpart_member_id, item, purpose, expires_at}` → 201 `{consent_id, ...}`. 소개된 상대인지 내부에서 확인 |

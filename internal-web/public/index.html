@@ -62,13 +62,14 @@
           <div class="section-title"><h2>회원 목록</h2><span class="muted" id="members-count"></span></div>
           <div class="tablewrap">
             <table>
-              <thead><tr><th>회원(가명 ID)</th><th>출생연도</th><th>직업</th><th>담당 직원</th><th>유효 동의</th><th>상태</th><th>관리</th></tr></thead>
+              <thead><tr><th>회원</th><th>나이</th><th>키</th><th>학력</th><th>직군</th><th>담당 직원</th><th>상태</th><th>관리</th></tr></thead>
               <tbody id="members-body"></tbody>
             </table>
             <div class="empty" id="members-empty" hidden>회원이 없습니다.</div>
           </div>
           <div class="card mt16" id="member-detail" hidden>
             <div class="row-between"><h2 id="member-detail-title"></h2><span id="member-detail-status"></span></div>
+            <dl class="facts" id="member-facts"></dl>
             <h3 class="mt16">매칭 현황</h3>
             <p class="muted">회원이 외부 화면에서 서로 매칭을 누르면 양쪽 프로필 제공 동의(30일)가 자동으로 만들어집니다.</p>
             <div class="tablewrap">
@@ -90,7 +91,7 @@
 
           <div data-roles="counselor">
             <div class="section-title" id="request-section"><h2>소개 자료 발송</h2><span class="muted">매칭 성사 → 담당 상담이 "발송 요청" → 승인자가 승인하면 상대 회원이 받음</span></div>
-            <div class="notice">소개 자료는 직원이 올리지 않습니다. 회원 상세의 매칭 동의에서 <strong>발송 요청</strong>을 누르면 서버가 회원 정보(가명 ID·연령대·직업·증빙 확인 여부)로 자료를 만들어 신청합니다. 이름·연락처·증빙 원본은 들어가지 않습니다.</div>
+            <div class="notice">소개 자료는 직원이 올리지 않습니다. 회원 상세의 매칭 동의에서 <strong>발송 요청</strong>을 누르면 서버가 회원 정보(닉네임·만 나이·실명·키·몸무게·학력·직군·소개, 재직 증빙이 통과된 경우 직장)로 자료를 만들어 신청합니다. 연락처·증빙 원본은 들어가지 않습니다.</div>
             <p id="request-result" class="result" hidden></p>
             <div class="section-title"><h2>내 발송 신청 내역</h2></div>
             <div class="tablewrap">
@@ -106,7 +107,7 @@
 
       <!-- ② 회원 관리: 정보 수정·탈퇴 (상담: 담당 회원 / 총관리자: 전체 + 내보내기) -->
       <section class="view" data-view="manage" data-title="회원 관리" hidden>
-        <div class="page-heading"><div><span class="eyebrow">MEMBER ADMINISTRATION</span><h1>회원 관리</h1><p class="muted">회원 정보(출생연도·직업)를 수정하고 탈퇴를 처리합니다. 상담 직원은 담당 회원만, 총관리자는 전체 회원을 관리합니다.</p></div></div>
+        <div class="page-heading"><div><span class="eyebrow">MEMBER ADMINISTRATION</span><h1>회원 관리</h1><p class="muted">회원 프로필(닉네임·생년월일·키·몸무게·학력·직군·직장·소개)을 수정하고 탈퇴를 처리합니다. 상담 직원은 담당 회원만, 총관리자는 전체 회원을 관리합니다.</p></div></div>
         <div class="stats">
           <div><span class="small-label">관리 회원</span><strong id="stat-members">—</strong></div>
           <div><span class="small-label">활동 중</span><strong id="stat-active">—</strong></div>
@@ -117,18 +118,27 @@
           <div class="section-title"><h2>회원 정보</h2><span class="muted">새 회원은 상담 직원에게 무작위로 배정됩니다</span></div>
           <div class="tablewrap">
             <table>
-              <thead><tr><th>회원(가명 ID)</th><th>출생연도</th><th>직업</th><th>담당 직원</th><th>외부 계정</th><th>상태</th><th>관리</th></tr></thead>
+              <thead><tr><th>회원</th><th>나이</th><th>학력</th><th>직군 · 직장</th><th>증빙</th><th>담당 직원</th><th>상태</th><th>관리</th></tr></thead>
               <tbody id="manage-body"></tbody>
             </table>
             <div class="empty" id="manage-empty" hidden>회원이 없습니다.</div>
           </div>
           <div class="card mt16" id="edit-card" hidden>
             <h3 id="edit-title">회원 정보 수정</h3>
-            <form class="form edit" id="edit-form">
+            <p class="muted">학력(구분·학교·전공)을 바꾸면 학력 증빙, 직장을 바꾸면 재직 증빙을 다시 심사해야 합니다. 실명·연락처는 여기서 다루지 않습니다.</p>
+            <form class="form grid3" id="edit-form">
               <input type="hidden" name="member_id">
-              <label>출생연도<input type="number" name="birth_year" min="1900" max="2100" required></label>
-              <label>직업<input type="text" name="job" maxlength="40" required></label>
-              <div class="actions"><button type="submit" class="btn primary">저장</button><button type="button" class="btn" id="edit-cancel">취소</button></div>
+              <label>닉네임(가명)<input type="text" name="nickname" minlength="2" maxlength="20" required></label>
+              <label>생년월일<input type="date" name="birth_date"></label>
+              <label>키(cm, 본인 신고)<input type="number" name="height_cm" min="120" max="230"></label>
+              <label>몸무게(kg, 본인 신고)<input type="number" name="weight_kg" min="30" max="200"></label>
+              <label>최종 학력<select name="education_level"><option value="">선택</option><option>고졸</option><option>전문대졸</option><option>4년제 대졸</option><option>대학원졸</option></select></label>
+              <label>학교<input type="text" name="school" maxlength="60"></label>
+              <label>전공<input type="text" name="major" maxlength="60"></label>
+              <label>직군<input type="text" name="job_group" maxlength="30"></label>
+              <label>직장<input type="text" name="company" maxlength="60"></label>
+              <label class="span-all">소개<input type="text" name="introduction" maxlength="200"></label>
+              <div class="actions span-all"><button type="submit" class="btn primary">저장</button><button type="button" class="btn" id="edit-cancel">취소</button></div>
             </form>
           </div>
           <p id="manage-result" class="result" hidden></p>
@@ -150,12 +160,12 @@
               <div class="empty" id="exports-empty" hidden>내보내기 내역이 없습니다.</div>
             </div>
           </div>
-        </div><aside class="guide"><span class="eyebrow">STAFF GUIDE</span><h2>회원 관리</h2><ol><li><p>수정할 수 있는 항목은 출생연도·직업뿐이며, 이름·연락처는 화면에 나오지 않습니다.</p></li><li><p>탈퇴하면 이름·연락처가 지워지고, 이 회원이 주고받은 동의와 매칭이 모두 철회됩니다. 되돌릴 수 없습니다.</p></li><li><p>상담 직원의 내보내기 내역이 보이면 즉시 확인하세요(총관리자).</p></li><li><p>모든 조회·변경은 추적번호와 함께 감사 로그에 기록됩니다.</p></li></ol></aside></div>
+        </div><aside class="guide"><span class="eyebrow">STAFF GUIDE</span><h2>회원 관리</h2><ol><li><p>실명·연락처는 화면에 나오지 않습니다. 학력·직장을 바꾸면 해당 증빙을 다시 심사해야 합니다.</p></li><li><p>탈퇴하면 실명·연락처·학교·직장·소개가 지워지고, 이 회원이 주고받은 동의와 매칭이 모두 철회됩니다. 되돌릴 수 없습니다.</p></li><li><p>상담 직원의 내보내기 내역이 보이면 즉시 확인하세요(총관리자).</p></li><li><p>모든 조회·변경은 추적번호와 함께 감사 로그에 기록됩니다.</p></li></ol></aside></div>
       </section>
 
       <!-- ③ 회원·서류 조회·심사·승인 (상담: 담당 회원 / 총관리자: 전체) -->
       <section class="view" data-view="evidence" data-title="회원·서류 심사" hidden>
-        <div class="page-heading"><div><span class="eyebrow">DOCUMENT REVIEW</span><h1>회원 · 서류 조회 · 심사 · 승인</h1><p class="muted">회원이 제출한 증빙 서류를 열람하고 통과(승인) 또는 반려합니다. 상담 직원은 담당 회원의 서류만, 총관리자는 전체 서류를 심사합니다.</p></div></div>
+        <div class="page-heading"><div><span class="eyebrow">DOCUMENT REVIEW</span><h1>회원 · 서류 조회 · 심사 · 승인</h1><p class="muted">회원이 제출한 학력(졸업증명서)·재직(재직증명서) 서류를 열람하고 통과(승인) 또는 반려합니다. 학력이 통과되어야 회원이 매칭할 수 있고, 재직이 통과되면 소개 자료에 직장이 함께 나갑니다.</p></div></div>
         <div class="content-layout"><div class="work">
           <div class="section-title"><h2>제출 서류</h2>
             <div class="filters" id="evidence-filters">
@@ -166,7 +176,7 @@
           </div>
           <div class="tablewrap">
             <table>
-              <thead><tr><th>서류 ID</th><th>회원(가명 ID)</th><th>접수</th><th>상태</th><th>심사자</th><th>삭제 기한</th><th>관리</th></tr></thead>
+              <thead><tr><th>서류 ID</th><th>회원</th><th>종류</th><th>접수</th><th>상태</th><th>심사자</th><th>삭제 기한</th><th>관리</th></tr></thead>
               <tbody id="reviews-body"></tbody>
             </table>
             <div class="empty" id="reviews-empty" hidden>서류가 없습니다.</div>

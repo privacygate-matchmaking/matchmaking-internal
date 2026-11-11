@@ -12,7 +12,7 @@ import json
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, File, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import Response
 from privacygate import gate_mode
 from privacygate.errors import ErrorCode, GateError
@@ -59,21 +59,44 @@ def me(request: Request, principal: Principal = Depends(require(*STAFF_ROLES))):
 # 회원 조회·관리 (counselor: 담당 회원만 / data_admin=총관리자: 전체)
 # ======================================================================
 MEMBER_ROLES = (Role.COUNSELOR, Role.DATA_ADMIN)
+EDUCATION_LEVELS = ("고졸", "전문대졸", "4년제 대졸", "대학원졸")
 
 # 담당 범위 조건: counselor 는 assignments 에 있는 회원만, data_admin 은 전체
 SCOPE_SQL = """(%(role)s = 'data_admin' OR EXISTS (SELECT 1 FROM assignments a
                  WHERE a.member_id = m.member_id AND a.user_id = %(uid)s))"""
+
+# 직원 화면에 보이는 프로필 항목 (실명·연락처는 넣지 않는다)
+PROFILE_COLS = """m.member_id, m.pseudo_id, m.nickname, m.birth_date, m.height_cm, m.weight_kg,
+                  m.education_level, m.school, m.major, m.job_group, m.company, m.introduction,
+                  m.education_verified, m.employment_verified, m.status, m.withdrawn_at, m.created_at,
+                  (m.user_id IS NOT NULL) AS has_account"""
 
 
 def _scope(principal: Principal) -> dict:
     return {"role": principal.role, "uid": principal.user_id}
 
 
+def _age(birth_date) -> int | None:
+    """만 나이."""
+    if not birth_date:
+        return None
+    today = _now().date()
+    return today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
+
+
+def _profile(r) -> dict:
+    return {"member_id": str(r["member_id"]), "pseudo_id": r["pseudo_id"], "nickname": r["nickname"],
+            "birth_date": r["birth_date"].isoformat() if r["birth_date"] else None, "age": _age(r["birth_date"]),
+            "height_cm": r["height_cm"], "weight_kg": r["weight_kg"],
+            "education_level": r["education_level"], "school": r["school"], "major": r["major"],
+            "job_group": r["job_group"], "company": r["company"], "introduction": r["introduction"],
+            "education_verified": r["education_verified"], "employment_verified": r["employment_verified"],
+            "status": r["status"], "has_account": r["has_account"], "created_at": _iso(r["created_at"])}
+
+
 def _member_in_scope(conn, principal: Principal, member_id) -> dict:
     """범위 밖 회원은 404 (존재 여부를 알리지 않음)."""
-    row = conn.execute(f"""SELECT m.member_id, m.pseudo_id, m.birth_year, m.job, m.status, m.withdrawn_at,
-                                  (m.user_id IS NOT NULL) AS has_account
-                             FROM members m WHERE m.member_id = %(mid)s AND {SCOPE_SQL}""",
+    row = conn.execute(f"SELECT {PROFILE_COLS} FROM members m WHERE m.member_id = %(mid)s AND {SCOPE_SQL}",
                        {**_scope(principal), "mid": member_id}).fetchone()
     if row is None:
         raise GateError(ErrorCode.NOT_FOUND, "member_not_in_scope")
@@ -82,11 +105,11 @@ def _member_in_scope(conn, principal: Principal, member_id) -> dict:
 
 @router.get("/members")
 def list_members(request: Request, principal: Principal = Depends(require(*MEMBER_ROLES))):
-    """회원 목록: 허용 항목(가명 ID·출생연도·직업)과 담당 직원·상태. 이름·연락처는 주지 않는다."""
+    """회원 목록: 프로필(닉네임·만 나이·키·몸무게·학력·직군·직장·소개·증빙 상태)과 담당 직원·상태.
+    실명·연락처는 주지 않는다."""
     with db.connection() as conn:
         rows = conn.execute(
-            f"""SELECT m.member_id, m.pseudo_id, m.birth_year, m.job, m.status, m.created_at,
-                       (m.user_id IS NOT NULL) AS has_account,
+            f"""SELECT {PROFILE_COLS},
                        (SELECT string_agg(u.pseudo_id || ' ' || u.display_name, ', ' ORDER BY u.pseudo_id)
                           FROM assignments a JOIN users u ON u.user_id = a.user_id
                          WHERE a.member_id = m.member_id) AS counselors,
@@ -97,33 +120,30 @@ def list_members(request: Request, principal: Principal = Depends(require(*MEMBE
                   FROM members m WHERE {SCOPE_SQL} ORDER BY m.status, m.pseudo_id""",
             _scope(principal)).fetchall()
     audit.allow(request, target_type="member_list_all" if principal.role == "data_admin" else "member_list")
-    return {"items": [{"member_id": str(r["member_id"]), "pseudo_id": r["pseudo_id"],
-                       "birth_year": r["birth_year"], "job": r["job"], "status": r["status"],
-                       "has_account": r["has_account"], "counselors": r["counselors"],
-                       "valid_consents": r["valid_consents"], "open_evidence": r["open_evidence"],
-                       "created_at": _iso(r["created_at"])} for r in rows]}
+    return {"items": [{**_profile(r), "counselors": r["counselors"], "valid_consents": r["valid_consents"],
+                       "open_evidence": r["open_evidence"]} for r in rows]}
 
 
 @router.get("/members/{member_id}")
 def get_member(member_id: uuid.UUID, request: Request,
                principal: Principal = Depends(require(*MEMBER_ROLES))):
-    """회원 상세: 허용 항목 + 이 회원이 정보 주체인 동의 + 매칭 상태. 범위 밖이면 404."""
+    """회원 상세: 프로필 + 이 회원이 정보 주체인 동의 + 매칭 상태. 범위 밖이면 404."""
     with db.connection() as conn:
         m = _member_in_scope(conn, principal, member_id)
         consents = conn.execute(
             """SELECT c.consent_id, c.consent_no, c.item, c.purpose, c.expires_at, c.revoked_at,
-                      cm.pseudo_id AS counterpart_pseudo_id, cm.user_id AS recipient_id
+                      cm.nickname AS counterpart_nickname, cm.pseudo_id AS counterpart_pseudo_id,
+                      cm.user_id AS recipient_id
                  FROM consents c JOIN members cm ON cm.member_id = c.counterpart_member_id
                 WHERE c.member_id = %s ORDER BY c.granted_at DESC""",
             (member_id,)).fetchall()
         matches = _match_rows(conn, member_id)
     audit.allow(request, target_type="member", target_id=m["pseudo_id"])
-    return {"member_id": str(m["member_id"]), "pseudo_id": m["pseudo_id"],
-            "birth_year": m["birth_year"], "job": m["job"], "status": m["status"],
-            "withdrawn_at": _iso(m["withdrawn_at"]), "has_account": m["has_account"],
+    return {**_profile(m), "withdrawn_at": _iso(m["withdrawn_at"]),
             "consents": [{"consent_id": str(c["consent_id"]), "consent_label": f"C-{c['consent_no']}",
                           "item": c["item"], "purpose": c["purpose"],
                           "counterpart_pseudo_id": c["counterpart_pseudo_id"],
+                          "counterpart_nickname": c["counterpart_nickname"],
                           "recipient_id": str(c["recipient_id"]) if c["recipient_id"] else None,
                           "expires_at": _iso(c["expires_at"]), "revoked_at": _iso(c["revoked_at"]),
                           "valid": c["revoked_at"] is None and c["expires_at"] > _now()}
@@ -132,41 +152,71 @@ def get_member(member_id: uuid.UUID, request: Request,
 
 
 class MemberUpdateIn(BaseModel):
-    birth_year: int | None = Field(default=None, ge=1900, le=2100)
-    job: str | None = Field(default=None, min_length=1, max_length=40)
+    nickname: str | None = Field(default=None, min_length=2, max_length=20)
+    birth_date: date | None = None
+    height_cm: int | None = Field(default=None, ge=120, le=230)
+    weight_kg: int | None = Field(default=None, ge=30, le=200)
+    education_level: str | None = Field(default=None, pattern="^(고졸|전문대졸|4년제 대졸|대학원졸)$")
+    school: str | None = Field(default=None, max_length=60)
+    major: str | None = Field(default=None, max_length=60)
+    job_group: str | None = Field(default=None, min_length=1, max_length=30)
+    company: str | None = Field(default=None, max_length=60)
+    introduction: str | None = Field(default=None, max_length=200)
+
+
+# 이 항목이 바뀌면 해당 증빙을 다시 받아야 한다
+EDU_FIELDS = {"education_level", "school", "major"}
+JOB_FIELDS = {"company"}
 
 
 @router.patch("/members/{member_id}")
 def update_member(member_id: uuid.UUID, body: MemberUpdateIn, request: Request,
                   principal: Principal = Depends(require(*MEMBER_ROLES)),
                   _csrf: None = Depends(require_csrf)):
-    """회원 정보 수정: 허용 항목(출생연도·직업)만. 담당 회원(총관리자는 전체), 탈퇴 회원은 불가. ※ 명세 외 추가"""
-    fields = body.model_dump(exclude_none=True)
+    """회원 정보 수정 (실명·연락처 제외). 담당 회원(총관리자는 전체), 탈퇴 회원은 불가.
+    학력 항목이 바뀌면 학력 증빙, 직장이 바뀌면 재직 증빙 확인이 풀린다 (다시 심사). ※ 명세 외 추가"""
+    fields = body.model_dump(exclude_unset=True)
+    if "nickname" in fields and not fields["nickname"]:
+        fields.pop("nickname")                                   # 닉네임은 비울 수 없다
     if not fields:
         raise GateError(ErrorCode.INVALID_REQUEST, "nothing_to_update")
+    if fields.get("birth_date") and not (date(1900, 1, 1) <= fields["birth_date"] <= _now().date()):
+        raise GateError(ErrorCode.INVALID_REQUEST, "birth_date_out_of_range")
     with db.connection() as conn:
         m = _member_in_scope(conn, principal, member_id)
         if m["status"] != "active":
             raise GateError(ErrorCode.INVALID_STATE, "member_withdrawn")
+        changed = {k for k, v in fields.items() if v != m[k]}
+        if EDU_FIELDS & changed:
+            fields["education_verified"] = False
+        if JOB_FIELDS & changed:
+            fields["employment_verified"] = False
+        if fields.get("nickname") and fields["nickname"] != m["nickname"]:
+            taken = conn.execute("SELECT 1 FROM members WHERE nickname = %s AND member_id <> %s",
+                                 (fields["nickname"], member_id)).fetchone()
+            if taken:
+                raise GateError(ErrorCode.INVALID_STATE, "nickname_taken")
         sets = ", ".join(f"{k} = %({k})s" for k in fields)       # 키는 모델 필드 이름으로 고정
-        row = conn.execute(f"UPDATE members SET {sets} WHERE member_id = %(mid)s RETURNING birth_year, job",
-                           {**fields, "mid": member_id}).fetchone()
+        conn.execute(f"UPDATE members SET {sets} WHERE member_id = %(mid)s", {**fields, "mid": member_id})
+        row = conn.execute(f"SELECT {PROFILE_COLS} FROM members m WHERE m.member_id = %s", (member_id,)).fetchone()
     audit.allow(request, target_type="member", target_id=m["pseudo_id"])
-    return {"member_id": str(member_id), "birth_year": row["birth_year"], "job": row["job"]}
+    return _profile(row)
 
 
 @router.post("/members/{member_id}/withdraw")
 def withdraw_member(member_id: uuid.UUID, request: Request,
                     principal: Principal = Depends(require(*MEMBER_ROLES)),
                     _csrf: None = Depends(require_csrf)):
-    """탈퇴 처리: 이름·연락처 삭제, 상태 withdrawn, 이 회원이 주거나 받은 동의 철회, 매칭 취소.
+    """탈퇴 처리: 실명·연락처·학교·직장·소개 삭제, 상태 withdrawn, 주고받은 동의 철회, 매칭 취소.
     회원 행과 감사·반출 기록은 남긴다 (기록이 회원 ID 를 참조). ※ 명세 외 추가"""
     with db.connection() as conn:
         m = _member_in_scope(conn, principal, member_id)
         if m["status"] != "active":
             raise GateError(ErrorCode.INVALID_STATE, "member_withdrawn")
         conn.execute("""UPDATE members SET status = 'withdrawn', withdrawn_at = now(), name = '(탈퇴 회원)',
-                               contact_phone = NULL, contact_email = NULL WHERE member_id = %s""", (member_id,))
+                               nickname = '탈퇴-' || pseudo_id, school = NULL, major = NULL, company = NULL,
+                               introduction = NULL, contact_phone = NULL, contact_email = NULL
+                         WHERE member_id = %s""", (member_id,))
         revoked = conn.execute("""UPDATE consents SET revoked_at = now()
                                    WHERE revoked_at IS NULL AND (member_id = %s OR counterpart_member_id = %s)""",
                                (member_id, member_id)).rowcount
@@ -180,11 +230,25 @@ def withdraw_member(member_id: uuid.UUID, request: Request,
 # ======================================================================
 # 매칭 소개 자료 발송 요청 (counselor). 자료는 직원이 올리지 않고 서버가 회원 DB 로 만든다
 # ======================================================================
-def _age_band(birth_year) -> str:
-    if not birth_year:
-        return "비공개"
-    age = _now().year - int(birth_year)
-    return f"{(age // 10) * 10}대"
+def _detail_profile(m, name: str) -> dict:
+    """매칭·동의 후 상대에게 주는 소개 자료.
+    중계 검사 형식(4개 항목, 각 300자 이하)에 맞춘다: member_pseudo_id 자리에 닉네임, age_band 자리에 만 나이.
+    직장은 재직 증빙이 통과된 경우에만 넣는다. 연락처·증빙 원본은 넣지 않는다."""
+    age = _age(m["birth_date"])
+    edu = m["education_level"] or "비공개"
+    if m["school"]:
+        edu += f" ({m['school']}{' ' + m['major'] if m['major'] else ''})"
+    edu += " · 학력 증빙 확인" if m["education_verified"] else ""
+    job = m["job_group"] or "비공개"
+    if m["employment_verified"] and m["company"]:
+        job += f" · {m['company']} (재직 증빙 확인)"
+    body = " / ".join(x for x in [
+        f"이름 {name}",
+        f"키 {m['height_cm']}cm · 몸무게 {m['weight_kg']}kg (본인 신고)" if m["height_cm"] else None,
+        f"학력 {edu}",
+        f"소개 {m['introduction']}" if m["introduction"] else None] if x)
+    return {"member_pseudo_id": m["nickname"][:300], "age_band": f"만 {age}세" if age is not None else "비공개",
+            "job_group": job[:300], "introduction": body[:300]}
 
 
 class IntroductionIn(BaseModel):
@@ -197,8 +261,8 @@ def request_introduction(member_id: uuid.UUID, body: IntroductionIn, request: Re
                          _csrf: None = Depends(require_csrf)):
     """매칭으로 생긴 유효 동의(이 회원 → 상대)로 소개 자료 발송을 요청한다. ※ 명세 외 추가
     1) 담당 회원·유효 동의·상대 외부 계정 확인
-    2) 소개 자료(JSON: 가명 ID·연령대·직업·소개 문구)를 회원 DB 에서 만든다 — 이름·연락처·증빙 원본은 넣지 않음
-       (증빙은 '심사 통과 여부'만 소개 문구에 표시)
+    2) 소개 자료(닉네임·만 나이·실명·키·몸무게·학력·직군·(재직 확인 시)직장·소개)를 회원 DB 에서 만든다
+       — 연락처·증빙 원본은 넣지 않는다
     3) 중계에 파일 등록(형식 검사) → 발송 신청(승인 대기). 승인은 다른 승인자가 한다."""
     with db.connection() as conn:
         m = _member_in_scope(conn, principal, member_id)
@@ -214,17 +278,11 @@ def request_introduction(member_id: uuid.UUID, body: IntroductionIn, request: Re
             raise GateError(ErrorCode.INVALID_STATE, "consent_not_valid")
         if c["recipient_id"] is None:
             raise GateError(ErrorCode.INVALID_STATE, "recipient_has_no_account")
-        verified = conn.execute(
-            """SELECT 1 FROM evidence_reviews r JOIN evidence_files e ON e.file_id = r.file_id
-                WHERE e.member_id = %s AND r.result = 'passed' LIMIT 1""", (member_id,)).fetchone() is not None
-    job = m["job"] or "비공개"
-    profile = {"member_pseudo_id": m["pseudo_id"], "age_band": _age_band(m["birth_year"]), "job_group": job,
-               "introduction": f"{_age_band(m['birth_year'])} {job} 회원입니다. "
-                               f"증빙 서류 {'확인 완료' if verified else '확인 전'}."}
-    data = json.dumps(profile, ensure_ascii=False).encode("utf-8")
-    with db.connection() as conn:
+        name = conn.execute("SELECT name FROM members WHERE member_id = %s", (member_id,)).fetchone()["name"]
         seq = conn.execute("SELECT coalesce(max(seq), 0) + 1 AS n FROM intro_files WHERE member_id = %s",
                            (member_id,)).fetchone()["n"]
+    profile = _detail_profile(m, name)
+    data = json.dumps(profile, ensure_ascii=False).encode("utf-8")
     label = f"{m['pseudo_id']}_file{seq}"                      # 화면용 이름 (예: M-001_file1)
     up = transfer_client.call(request, "POST", "/api/transfer-files",
                               files={"file": (f"{label}.json", data, "application/json")})
@@ -252,7 +310,8 @@ def request_introduction(member_id: uuid.UUID, body: IntroductionIn, request: Re
 # ======================================================================
 # 관리자 전체 회원 내보내기 (공격 ① 대상)
 # ======================================================================
-EXPORT_COLUMNS = ("pseudo_id", "name", "birth_year", "job", "contact_phone", "contact_email")
+EXPORT_COLUMNS = ("pseudo_id", "nickname", "name", "birth_date", "height_cm", "weight_kg", "education_level",
+                  "school", "major", "job_group", "company", "contact_phone", "contact_email")
 
 
 @router.post("/admin/member-exports", status_code=201)
@@ -330,6 +389,7 @@ def register_export_to_transfer(export_id: uuid.UUID, request: Request,
 # ======================================================================
 @router.post("/evidence-files", status_code=201)
 async def submit_evidence(request: Request, file: UploadFile = File(...),
+                          kind: str = Form("education", pattern="^(education|employment)$"),
                           member: Principal = Depends(member_via_transfer)):
     """회원 증빙 제출 (회원 → external-api → transfer-api → 여기). PDF, 최대 2MiB.
     본인(토큰 sub 의 회원) 명의로만 접수하고 AES-GCM 으로 암호화해 저장한다."""
@@ -345,13 +405,13 @@ async def submit_evidence(request: Request, file: UploadFile = File(...),
     storage.put(key, data)
     with db.connection() as conn:
         row = conn.execute(
-            """INSERT INTO evidence_files (file_id, member_id, submitted_by, storage_key,
+            """INSERT INTO evidence_files (file_id, member_id, submitted_by, kind, storage_key,
                                            key_id, file_hash, status, delete_after)
-               VALUES (%s, %s, %s, %s, %s, %s, 'submitted', %s) RETURNING created_at""",
-            (file_id, owner["member_id"], member.user_id, key, storage.key_id(),
+               VALUES (%s, %s, %s, %s, %s, %s, %s, 'submitted', %s) RETURNING created_at""",
+            (file_id, owner["member_id"], member.user_id, kind, key, storage.key_id(),
              storage.sha256_hex(data), _now() + timedelta(days=s.evidence_unreviewed_days))).fetchone()
     audit.allow(request, target_type="evidence", target_id=str(file_id))
-    return {"file_id": str(file_id), "status": "submitted", "created_at": _iso(row["created_at"])}
+    return {"file_id": str(file_id), "kind": kind, "status": "submitted", "created_at": _iso(row["created_at"])}
 
 
 @router.get("/evidence-files")
@@ -359,7 +419,8 @@ def list_evidence(request: Request, principal: Principal = Depends(require(*MEMB
     """심사할 증빙 목록: counselor 는 담당 회원의 증빙만, 총관리자는 전체. 원본 내용은 넣지 않는다. ※ 명세 외 추가"""
     with db.connection() as conn:
         rows = conn.execute(
-            f"""SELECT e.file_id, m.pseudo_id, m.member_id, e.status, e.created_at, e.delete_after, e.legal_hold,
+            f"""SELECT e.file_id, m.pseudo_id, m.nickname, m.member_id, e.kind, e.status, e.created_at,
+                       e.delete_after, e.legal_hold,
                        r.result, u.pseudo_id AS reviewer
                   FROM evidence_files e JOIN members m ON m.member_id = e.member_id
                   LEFT JOIN evidence_reviews r ON r.file_id = e.file_id
@@ -368,14 +429,15 @@ def list_evidence(request: Request, principal: Principal = Depends(require(*MEMB
             _scope(principal)).fetchall()
     audit.allow(request, target_type="evidence_list")
     return {"items": [{"file_id": str(r["file_id"]), "member_id": str(r["member_id"]),
-                       "member_pseudo_id": r["pseudo_id"], "status": r["status"], "review_result": r["result"],
+                       "member_pseudo_id": r["pseudo_id"], "member_nickname": r["nickname"], "kind": r["kind"],
+                       "status": r["status"], "review_result": r["result"],
                        "reviewer": r["reviewer"], "created_at": _iso(r["created_at"]),
                        "delete_after": _iso(r["delete_after"]), "legal_hold": r["legal_hold"]} for r in rows]}
 
 
 def _assigned_evidence(conn, file_id, principal: Principal) -> dict:
     """담당 회원의 증빙(총관리자는 전체)만. 범위 밖이면 404."""
-    row = conn.execute(f"""SELECT e.file_id, e.storage_key, e.status FROM evidence_files e
+    row = conn.execute(f"""SELECT e.file_id, e.member_id, e.kind, e.storage_key, e.status FROM evidence_files e
                              JOIN members m ON m.member_id = e.member_id
                             WHERE e.file_id = %(fid)s AND {SCOPE_SQL}""",
                        {**_scope(principal), "fid": file_id}).fetchone()
@@ -424,8 +486,12 @@ def review_evidence(file_id: uuid.UUID, body: ReviewIn, request: Request,
         conn.execute("""UPDATE evidence_files SET status = 'reviewed', delete_after = %s,
                                reviewer_user_id = %s WHERE file_id = %s""",
                      (delete_after, principal.user_id, file_id))
+        if body.result == "passed":
+            # 학력 증빙 통과 → 매칭 가능, 재직 증빙 통과 → 소개 자료에 직장 포함
+            flag = "education_verified" if row["kind"] == "education" else "employment_verified"
+            conn.execute(f"UPDATE members SET {flag} = true WHERE member_id = %s", (row["member_id"],))
     audit.allow(request, target_type="evidence", target_id=str(file_id))
-    return {"file_id": str(file_id), "status": "reviewed", "review_result": body.result,
+    return {"file_id": str(file_id), "kind": row["kind"], "status": "reviewed", "review_result": body.result,
             "delete_after": _iso(delete_after)}
 
 
@@ -435,12 +501,12 @@ def my_evidence_files(request: Request, member: Principal = Depends(member_via_t
     owner = _member_of(member.user_id)
     with db.connection() as conn:
         rows = conn.execute(
-            """SELECT e.file_id, e.status, e.created_at, r.result
+            """SELECT e.file_id, e.kind, e.status, e.created_at, r.result
                  FROM evidence_files e LEFT JOIN evidence_reviews r ON r.file_id = e.file_id
                 WHERE e.member_id = %s ORDER BY e.created_at DESC""",
             (owner["member_id"],)).fetchall()
     audit.allow(request, target_type="evidence_list")
-    return {"items": [{"file_id": str(r["file_id"]), "status": r["status"],
+    return {"items": [{"file_id": str(r["file_id"]), "kind": r["kind"], "status": r["status"],
                        "created_at": _iso(r["created_at"]), "review_result": r["result"]} for r in rows]}
 
 
@@ -557,7 +623,8 @@ MATCH_CONSENT_DAYS = 30
 def _match_rows(conn, member_id) -> list[dict]:
     """소개된 상대별 매칭 상태: 내가 눌렀는지, 상대가 눌렀는지, 성사 여부."""
     rows = conn.execute(
-        """SELECT cm.member_id, cm.pseudo_id,
+        """SELECT cm.member_id, cm.pseudo_id, cm.nickname, cm.birth_date, cm.height_cm, cm.weight_kg,
+                  cm.education_level, cm.education_verified, cm.job_group, cm.introduction,
                   mine.created_at AS i_at, theirs.created_at AS they_at
              FROM introductions i
              JOIN members cm ON cm.member_id = i.counterpart_member_id AND cm.status = 'active'
@@ -567,6 +634,11 @@ def _match_rows(conn, member_id) -> list[dict]:
                                      AND theirs.cancelled_at IS NULL
             WHERE i.member_id = %s ORDER BY cm.pseudo_id""", (member_id,)).fetchall()
     return [{"counterpart_member_id": str(r["member_id"]), "counterpart_pseudo_id": r["pseudo_id"],
+             # 매칭 전 공개 카드: 닉네임·만 나이·키·몸무게·학력 구분·직군·소개 (실명·학교·직장·연락처 없음)
+             "card": {"nickname": r["nickname"], "age": _age(r["birth_date"]), "height_cm": r["height_cm"],
+                      "weight_kg": r["weight_kg"], "education_level": r["education_level"],
+                      "education_verified": r["education_verified"], "job_group": r["job_group"],
+                      "introduction": r["introduction"]},
              "i_matched": r["i_at"] is not None, "they_matched": r["they_at"] is not None,
              "matched": r["i_at"] is not None and r["they_at"] is not None,
              "matched_at": _iso(max(r["i_at"], r["they_at"])) if r["i_at"] and r["they_at"] else None}
@@ -579,8 +651,11 @@ def my_matches(request: Request, member: Principal = Depends(member_via_transfer
     owner = _member_of(member.user_id)
     with db.connection() as conn:
         items = _match_rows(conn, owner["member_id"])
+        verified = conn.execute("SELECT education_verified FROM members WHERE member_id = %s",
+                                (owner["member_id"],)).fetchone()["education_verified"]
     audit.allow(request, target_type="match_list")
-    return {"items": items}
+    # can_match=false 이면 화면에서 "학력 증빙 승인 후 매칭할 수 있습니다" 안내
+    return {"can_match": verified, "items": items}
 
 
 class MatchIn(BaseModel):
@@ -605,6 +680,10 @@ def create_match(body: MatchIn, request: Request, member: Principal = Depends(me
     owner = _member_of(member.user_id)
     me_id, other = owner["member_id"], body.counterpart_member_id
     with db.connection() as conn:
+        verified = conn.execute("SELECT education_verified FROM members WHERE member_id = %s",
+                                (me_id,)).fetchone()["education_verified"]
+        if not verified:
+            raise GateError(ErrorCode.INVALID_STATE, "education_not_verified")   # 학력 증빙 통과 후 매칭 가능
         ok = conn.execute(
             """SELECT 1 FROM introductions i JOIN members cm ON cm.member_id = i.counterpart_member_id
                 WHERE i.member_id = %s AND i.counterpart_member_id = %s AND cm.status = 'active'""",

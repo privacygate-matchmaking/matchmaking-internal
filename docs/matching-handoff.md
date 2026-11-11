@@ -9,6 +9,15 @@
 - 매칭 취소 시 매칭으로 만든 양쪽 동의가 철회됩니다. 탈퇴 회원은 상대 목록에서 빠집니다.
 - 시드: 회원 1(M-001, 로그인 계정 없음)은 이미 member_b(M-003)에게 매칭을 눌러 둔 상태 → member_b 가 M-001 에게 매칭을 누르면 성사.
 
+## 회원 프로필·증빙 (추가)
+- 매칭 전 상대에게 보이는 정보: `my-matches` 응답의 `card` (닉네임·만 나이·키·몸무게·학력 구분·학력 증빙 여부·직군·소개). 실명·학교·직장·연락처는 없음.
+- **학력 증빙이 통과되어야 매칭 가능**: `can_match=false` 이면 매칭 버튼 대신 "학력 증빙(졸업증명서) 승인 후 매칭할 수 있습니다" 안내. 강제로 눌러도 409 `education_not_verified`.
+- 증빙 제출에 종류 추가: multipart 에 `kind` = `education`(졸업증명서) / `employment`(재직증명서). 생략하면 education. → 회원 화면 증빙 제출에 종류 선택을 넣어 주세요.
+- 매칭·승인 후 받는 소개 자료(JSON 4개 항목, 현재 중계 검사 형식 그대로):
+  `member_pseudo_id`=닉네임, `age_band`="만 32세", `job_group`=직군(재직 증빙 통과 시 " · 직장명 (재직 증빙 확인)" 추가),
+  `introduction`="이름 … / 키 …cm · 몸무게 …kg (본인 신고) / 학력 … (학교 전공) · 학력 증빙 확인 / 소개 …"
+  → 나중에 항목을 나눠 받고 싶으면 중계 검사 스키마(`PROFILE_FIELDS`)를 늘려 주세요. 내부에서 맞춰 보내겠습니다.
+
 ## internal-api (transfer-api 서비스 토큰 + `X-User-Token` 회원 토큰, 기존 my-consents 와 같은 방식)
 
 | 메서드 | 경로 | 요청 → 응답 |
@@ -24,4 +33,3 @@
 
 ## 함께 부탁드리는 것
 1. `services/ieum/identity.py` JWKS 로딩: `use == "sig"` 인 키만 읽도록 (Keycloak 의 RSA-OAEP 암호화 키 때문에 모든 토큰이 거부되던 문제. 현재는 Keycloak 에서 암호화 키를 꺼서 우회 중)
-2. `GET /api/export-requests` 목록 항목에 `approval_id` 포함 (승인 후 회수 버튼용)
