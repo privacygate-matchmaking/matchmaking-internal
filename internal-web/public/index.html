@@ -91,7 +91,7 @@
 
           <div data-roles="counselor">
             <div class="section-title" id="request-section"><h2>소개 자료 발송</h2><span class="muted">매칭 성사 → 담당 상담이 "발송 요청" → 승인자가 승인하면 상대 회원이 받음</span></div>
-            <div class="notice">소개 자료는 직원이 올리지 않습니다. 회원 상세의 매칭 동의에서 <strong>발송 요청</strong>을 누르면 서버가 회원 정보(닉네임·만 나이·실명·키·몸무게·학력·직군·소개, 재직 증빙이 통과된 경우 직장)로 자료를 만들어 신청합니다. 연락처·증빙 원본은 들어가지 않습니다.</div>
+            <div class="notice">소개 자료는 직원이 올리지 않습니다. 회원 상세의 매칭 동의에서 <strong>발송 요청</strong>을 누르면 서버가 회원 정보(회원 코드·만 나이·실명·키·몸무게·학력·직군·소개, 재직 증빙이 통과된 경우 직장)로 자료를 만들어 신청합니다. 연락처·증빙 원본은 들어가지 않습니다.</div>
             <p id="request-result" class="result" hidden></p>
             <div class="section-title"><h2>내 발송 신청 내역</h2></div>
             <div class="tablewrap">
@@ -107,7 +107,7 @@
 
       <!-- ② 회원 관리: 정보 수정·탈퇴 (상담: 담당 회원 / 총관리자: 전체 + 내보내기) -->
       <section class="view" data-view="manage" data-title="회원 관리" hidden>
-        <div class="page-heading"><div><span class="eyebrow">MEMBER ADMINISTRATION</span><h1>회원 관리</h1><p class="muted">회원 프로필(닉네임·생년월일·키·몸무게·학력·직군·직장·소개)을 수정하고 탈퇴를 처리합니다. 상담 직원은 담당 회원만, 총관리자는 전체 회원을 관리합니다.</p></div></div>
+        <div class="page-heading"><div><span class="eyebrow">MEMBER ADMINISTRATION</span><h1>회원 관리</h1><p class="muted">회원 프로필(생년월일·키·몸무게·학력·직군·직장·소개)을 수정하고 탈퇴를 처리합니다. 상담 직원은 담당 회원만, 총관리자는 전체 회원을 관리합니다.</p></div></div>
         <div class="stats">
           <div><span class="small-label">관리 회원</span><strong id="stat-members">—</strong></div>
           <div><span class="small-label">활동 중</span><strong id="stat-active">—</strong></div>
@@ -128,7 +128,6 @@
             <p class="muted">학력(구분·학교·전공)을 바꾸면 학력 증빙, 직장을 바꾸면 재직 증빙을 다시 심사해야 합니다. 실명·연락처는 여기서 다루지 않습니다.</p>
             <form class="form grid3" id="edit-form">
               <input type="hidden" name="member_id">
-              <label>닉네임(가명)<input type="text" name="nickname" minlength="2" maxlength="20" required></label>
               <label>생년월일<input type="date" name="birth_date"></label>
               <label>키(cm, 본인 신고)<input type="number" name="height_cm" min="120" max="230"></label>
               <label>몸무게(kg, 본인 신고)<input type="number" name="weight_kg" min="30" max="200"></label>

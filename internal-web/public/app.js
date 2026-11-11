@@ -151,12 +151,7 @@ function selectView(name) {
 
 // ---- ① 담당 회원 조회 ----
 function memberStatus(m) { return pill(m.status || "active"); }
-// 닉네임 + 회원 코드(작게)
-function memberCell(m) {
-  const d = el("div");
-  d.append(el("strong", m.nickname || m.pseudo_id), el("span", m.pseudo_id, "sub-code"));
-  return d;
-}
+function memberCell(m) { return el("strong", m.pseudo_id); }
 function withMark(text, ok) {
   const d = el("span", text ?? "-");
   if (ok) d.append(el("span", "✓ 증빙", "ok-mark"));
@@ -180,7 +175,7 @@ async function showMember(memberId) {
   if (!res.ok) { box.hidden = true; return alertInline($("members-empty"), await describe(res)); }
   const m = await res.json();
   state.consents[m.member_id] = m.consents;
-  $("member-detail-title").textContent = `${m.nickname} (${m.pseudo_id})`;
+  $("member-detail-title").textContent = m.pseudo_id;
   $("member-detail-status").replaceChildren(pill(m.status));
   const f = $("member-facts");
   f.replaceChildren();
@@ -191,11 +186,11 @@ async function showMember(memberId) {
   fact(f, "소개", m.introduction ?? "-", "long");
   const yes = (v) => el("span", v ? "매칭함" : "-", v ? "pill" : "muted");
   fill("matches-body", "matches-empty", m.matches.map((x) =>
-    row([x.card?.nickname || x.counterpart_pseudo_id, yes(x.i_matched), yes(x.they_matched),
+    row([x.counterpart_pseudo_id, yes(x.i_matched), yes(x.they_matched),
          x.matched ? el("span", "매칭 성사", "pill green") : el("span", "대기", "muted")])));
   const counselor = isCounselor();
   fill("consents-body", "consents-empty", m.consents.map((c) => {
-    const cells = [c.counterpart_nickname || c.counterpart_pseudo_id, c.item, c.purpose, toKst(c.expires_at),
+    const cells = [c.counterpart_pseudo_id, c.item, c.purpose, toKst(c.expires_at),
                    pill(c.revoked_at ? "revoked" : c.valid ? "approved" : "rejected")];
     if (counselor) cells.push(c.valid && m.status === "active"
       ? actions(button("발송 요청", () => requestIntroduction(m, c), "btn sm primary")) : "-");
@@ -221,7 +216,7 @@ async function requestIntroduction(m, c) {
   const res = await api(`/api/members/${m.member_id}/introductions`, { method: "POST", json: { consent_id: c.consent_id } });
   if (!res.ok) { showResult(out, await describe(res), false); out.scrollIntoView({ block: "nearest" }); return; }
   const r = await res.json();
-  showResult(out, `${m.nickname} → ${c.counterpart_nickname || c.counterpart_pseudo_id} 발송 요청 완료 (승인 대기) · ${r.label}`, true);
+  showResult(out, `${m.pseudo_id} → ${c.counterpart_pseudo_id} 발송 요청 완료 (승인 대기) · ${r.label}`, true);
   out.scrollIntoView({ block: "nearest" });
   loadRequests();
 }
@@ -250,9 +245,9 @@ async function loadManage() {
 function openEdit(m) {
   const f = $("edit-form").elements;
   f.member_id.value = m.member_id;
-  for (const k of ["nickname", "birth_date", "height_cm", "weight_kg", "education_level", "school", "major",
+  for (const k of ["birth_date", "height_cm", "weight_kg", "education_level", "school", "major",
                    "job_group", "company", "introduction"]) f[k].value = m[k] ?? "";
-  $("edit-title").textContent = `회원 정보 수정 · ${m.nickname} (${m.pseudo_id})`;
+  $("edit-title").textContent = `회원 정보 수정 · ${m.pseudo_id}`;
   $("edit-card").hidden = false;
   $("edit-card").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
@@ -261,7 +256,7 @@ async function saveEdit(ev) {
   ev.preventDefault();
   const f = ev.target.elements;
   const body = {};
-  for (const k of ["nickname", "birth_date", "education_level", "school", "major", "job_group", "company", "introduction"]) {
+  for (const k of ["birth_date", "education_level", "school", "major", "job_group", "company", "introduction"]) {
     const v = f[k].value.trim();
     body[k] = v === "" ? null : v;
   }
@@ -280,14 +275,14 @@ async function withdraw(m) {
   // confirm() 대화상자 대신 같은 버튼을 한 번 더 누르게 한다 (실수 방지)
   if (state.pendingWithdraw !== m.member_id) {
     state.pendingWithdraw = m.member_id;
-    showResult($("manage-result"), `${m.nickname} 탈퇴: 실명·연락처·학교·직장·소개 삭제, 동의·매칭 철회. 되돌릴 수 없습니다. 진행하려면 '탈퇴'를 한 번 더 누르세요.`, false);
+    showResult($("manage-result"), `${m.pseudo_id} 탈퇴: 실명·연락처·학교·직장·소개 삭제, 동의·매칭 철회. 되돌릴 수 없습니다. 진행하려면 '탈퇴'를 한 번 더 누르세요.`, false);
     return;
   }
   state.pendingWithdraw = null;
   const res = await api(`/api/members/${m.member_id}/withdraw`, { method: "POST", json: {} });
   if (!res.ok) return showResult($("manage-result"), await describe(res), false);
   const r = await res.json();
-  showResult($("manage-result"), `${m.nickname} 탈퇴 처리 완료 · 철회된 동의 ${r.revoked_consents}건`, true);
+  showResult($("manage-result"), `${m.pseudo_id} 탈퇴 처리 완료 · 철회된 동의 ${r.revoked_consents}건`, true);
   loadManage();
 }
 
@@ -321,7 +316,7 @@ function renderReviews() {
     const status = e.status === "reviewed" && e.review_result
       ? el("span", e.review_result === "passed" ? "통과" : "반려", `pill ${e.review_result === "passed" ? "green" : "red"}`)
       : pill(e.status);
-    return row([mono(short(e.file_id)), memberCell({ nickname: e.member_nickname, pseudo_id: e.member_pseudo_id }),
+    return row([mono(short(e.file_id)), memberCell({ pseudo_id: e.member_pseudo_id }),
       e.kind === "employment" ? "재직" : "학력", toKst(e.created_at), status, e.reviewer || "-",
       toKst(e.delete_after) + (e.legal_hold ? " (보존)" : ""),
       open ? actions(button("열람", () => openEvidence(e.file_id)),
@@ -401,7 +396,7 @@ async function showRequest(id) {
   const prev = $("detail-preview");
   prev.replaceChildren();
   if (r.preview && typeof r.preview === "object") {
-    const names = { member_pseudo_id: "닉네임", age_band: "나이", job_group: "직군 · 직장", introduction: "상세" };
+    const names = { member_pseudo_id: "회원", age_band: "나이", job_group: "직군 · 직장", introduction: "상세" };
     for (const [k, v] of Object.entries(r.preview)) fact(prev, names[k] || k, typeof v === "string" ? v : JSON.stringify(v), k === "introduction" ? "long" : "");
   } else {
     fact(prev, "미리보기", "표시할 수 없습니다 (검사 미통과 또는 반출 금지 파일)");
