@@ -80,6 +80,13 @@ external-api 에는 업무 DB·증빙 저장소 접근 권한이 없다.
 
 | 경로 | 입력 → 응답 |
 |---|---|
+| `GET /api/members` | → `{"items": [{member_id, pseudo_id, birth_year, job}]}` (담당 회원만) |
+| `GET /api/members/{member_id}` | → `{member_id, pseudo_id, birth_year, job, consents: [{consent_id, item, purpose, counterpart_pseudo_id, recipient_id, expires_at, revoked_at, valid}]}`. 담당 아니면 404 |
+| `POST /api/admin/member-exports` | `{}` → 201 `{export_id, row_count, created_at}` (파일은 evidence-storage/exports 에 암호문) |
+| `POST /api/member-exports/{export_id}/transfer-files` | `{}` → 중계 응답 그대로 (`{file_id, scan_status, export_banned, ...}`). 이미 등록했으면 409 |
+| `GET /api/evidence-files` | → `{"items": [{file_id, member_pseudo_id, status, review_result, created_at, delete_after, legal_hold}]}` |
+| `GET /api/evidence-files/{file_id}/content` | → `application/pdf` (no-store, sandbox CSP). submitted → in_review 로 바뀜 |
+| `POST /api/evidence-files/{file_id}/review` | `{"result": "passed"\|"rejected"}` → `{file_id, status: "reviewed", review_result, delete_after}` (삭제 기한 +7일) |
 | `POST /api/internal/disclosure-checks` | `{member_id, recipient_id, consent_id, purpose, item}` → 허용 `{"allowed": true, "expires_at", "member_pseudo_id"}`, 거부 `{"allowed": false}` 또는 공통 403. 조회 실패·미구현을 허용으로 해석하지 않음. 신청·승인·다운로드마다 재호출 |
 | `POST /api/evidence-files` | multipart PDF(≤2MiB) → 201 `{file_id, status}` |
 | `GET /api/internal/my-evidence-files` | → `{"items": [{file_id, status, created_at, review_result?}]}` (status: submitted / in_review / reviewed / deleted) |

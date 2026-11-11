@@ -204,3 +204,5 @@ GitHub 조직 `privacygate-matchmaking`에 세 레포를 두고, 같은 상위 �
 | 서비스 토큰으로 인증된 요청의 `X-Trace-Id` 이어 쓰기 | 외부 → 중계 → 내부 감사 로그를 하나의 trace_id로 연결 |
 | `.gitattributes`로 소스·스크립트 줄바꿈 LF 고정 | Windows 작업 환경에서 `.sh`가 CRLF로 바뀌어 DB 초기화가 깨지는 문제 방지 (외부 레포와 같은 규칙) |
 | 회사 이름 "이음" (realm 표시 이름 "이음 (가상 결혼정보회사)") | 외부 화면과 통일 |
+| 직원 access token 서버 갱신 (refresh token, 세션 DB 보관) | 반출 화면이 중계를 부를 때 만료된 토큰 때문에 끊기지 않게 함. 토큰은 브라우저에 주지 않음 |
+| 증빙 원본 기한 삭제 주기 작업 (5분마다, `legal_hold` 제외) | 심사 후 7일·미심사 30일 보관 원칙을 자동 집행. 실패는 감사 로그 `evidence_delete` error |

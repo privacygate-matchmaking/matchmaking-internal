@@ -35,6 +35,7 @@ EXPECTED = {
     ("POST", "/api/transfer-files"): "roles:counselor",
     ("POST", "/api/export-requests"): "roles:counselor",
     ("GET", "/api/export-requests"): "roles:approver,counselor",
+    ("GET", "/api/export-requests/{request_id}"): "roles:approver,counselor",
     ("POST", "/api/export-requests/{request_id}/approve"): "roles:approver",
     ("POST", "/api/export-requests/{request_id}/reject"): "roles:approver",
     ("POST", "/api/approvals/{approval_id}/revoke"): "roles:approver",

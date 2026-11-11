@@ -54,13 +54,24 @@
       <section class="view" data-view="members" data-title="담당 회원" hidden>
         <div class="eyebrow">Assigned members</div>
         <h1>담당 회원</h1>
-        <p class="sub">담당 관계가 있는 회원의 허용 항목만 표시합니다. 담당이 아닌 회원은 조회되지 않습니다.</p>
+        <p class="sub">담당 관계가 있는 회원의 허용 항목(가명 ID·출생연도·직업)만 표시합니다. 담당이 아닌 회원은 조회되지 않습니다.</p>
         <div class="tablewrap">
           <table>
             <thead><tr><th>회원(가명 ID)</th><th>출생연도</th><th>직업</th><th>관리</th></tr></thead>
             <tbody id="members-body"></tbody>
           </table>
-          <div class="empty" id="members-empty">담당 회원 조회는 2주차에 연결됩니다 (GET /api/members).</div>
+          <div class="empty" id="members-empty" hidden>담당 회원이 없습니다.</div>
+        </div>
+        <div class="card mt16" id="member-detail" hidden>
+          <h2 id="member-detail-title"></h2>
+          <p class="muted">이 회원이 정보 주체인 동의입니다. 유효한 동의로만 반출을 신청할 수 있습니다.</p>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>수신 회원</th><th>항목</th><th>목적</th><th>만료</th><th>상태</th><th>관리</th></tr></thead>
+              <tbody id="consents-body"></tbody>
+            </table>
+            <div class="empty" id="consents-empty" hidden>등록된 동의가 없습니다.</div>
+          </div>
         </div>
       </section>
 
@@ -68,24 +79,45 @@
       <section class="view" data-view="requests" data-title="반출 신청" hidden>
         <div class="eyebrow">Export requests</div>
         <h1>반출 신청</h1>
-        <p class="sub">파일 검사(scan_status=passed)를 통과한 파일만 신청할 수 있습니다. 검사 통과는 승인이 아니며, 승인은 다른 승인자가 합니다.</p>
-        <div class="card">
-          <h2>새 신청</h2>
-          <form class="form" id="request-form">
-            <label>반출 파일<input type="file" name="file" disabled></label>
-            <label>수신 회원 ID (recipient_id)<input type="text" name="recipient_id" disabled></label>
-            <label>대상 회원 ID (member_id)<input type="text" name="member_id" disabled></label>
-            <label>목적 (purpose)<input type="text" name="purpose" disabled></label>
-            <label>만료일 (expires_at)<input type="date" name="expires_at" disabled></label>
-            <div class="wide"><button type="submit" class="btn primary" disabled>신청 (3주차)</button></div>
+        <p class="sub">① 소개 자료 파일 등록(검사) → ② 반출 신청 순서입니다. 검사 통과는 승인이 아니며, 승인은 다른 승인자가 합니다.</p>
+        <div class="two">
+          <div class="card">
+            <h2>① 반출 파일 등록</h2>
+            <p class="muted">소개 JSON(member_pseudo_id, age_band, job_group, introduction)만 검사를 통과합니다.</p>
+            <form class="form one" id="upload-form">
+              <label>파일<input type="file" name="file" accept="application/json,.json" required></label>
+              <div><button type="submit" class="btn primary">등록</button></div>
+            </form>
+            <p id="upload-result" class="result" hidden></p>
+          </div>
+          <div class="card">
+            <h2>② 반출 신청</h2>
+            <form class="form one" id="request-form">
+              <label>파일 ID (file_id)<input type="text" name="file_id" required pattern="[0-9a-fA-F-]{36}"></label>
+              <label>정보 주체 (담당 회원)<select name="member_id" id="req-member" required></select></label>
+              <label>동의 (수신자)<select name="consent_id" id="req-consent" required></select></label>
+              <label>목적<input type="text" name="purpose" value="introduction" required maxlength="64"></label>
+              <label>반출 기한<select name="days" id="req-days"><option value="1">1일</option><option value="3">3일</option><option value="7" selected>7일 (최대)</option></select></label>
+              <div><button type="submit" class="btn primary">신청</button></div>
+            </form>
+            <p id="request-result" class="result" hidden></p>
+          </div>
+        </div>
+        <div class="card mt16">
+          <h2>내보내기 결과 중계 등록</h2>
+          <p class="muted">본인이 만든 내보내기(export_id)만 등록할 수 있습니다. 전체 회원 파일은 검사에서 차단(blocked)됩니다.</p>
+          <form class="form inline" id="export-transfer-form">
+            <label>export_id<input type="text" name="export_id" required pattern="[0-9a-fA-F-]{36}"></label>
+            <div><button type="submit" class="btn">등록</button></div>
           </form>
+          <p id="export-transfer-result" class="result" hidden></p>
         </div>
         <div class="tablewrap">
           <table>
-            <thead><tr><th>신청 ID</th><th>수신자</th><th>목적</th><th>검사</th><th>상태</th><th>만료</th></tr></thead>
+            <thead><tr><th>신청 ID</th><th>파일</th><th>목적</th><th>상태</th><th>반출 기한</th><th>신청 시각</th></tr></thead>
             <tbody id="requests-body"></tbody>
           </table>
-          <div class="empty">내 신청 목록은 3주차에 연결됩니다 (GET /api/export-requests).</div>
+          <div class="empty" id="requests-empty" hidden>신청 내역이 없습니다.</div>
         </div>
       </section>
 
@@ -93,21 +125,22 @@
       <section class="view" data-view="reviews" data-title="증빙 심사" hidden>
         <div class="eyebrow">Evidence review</div>
         <h1>증빙 심사</h1>
-        <p class="sub">나에게 배정된 회원 증빙만 심사 중에 열람합니다. 원본은 암호화 저장되며 심사 후 삭제 기한이 설정됩니다.</p>
+        <p class="sub">나에게 배정된 회원 증빙만 심사 중에 열람합니다. 원본은 암호화 저장되며 심사 후 삭제 기한이 지나면 자동 삭제됩니다.</p>
         <div class="tablewrap">
           <table>
             <thead><tr><th>파일 ID</th><th>회원(가명 ID)</th><th>접수</th><th>상태</th><th>삭제 기한</th><th>관리</th></tr></thead>
             <tbody id="reviews-body"></tbody>
           </table>
-          <div class="empty">배정된 증빙 목록은 2주차에 연결됩니다.</div>
+          <div class="empty" id="reviews-empty" hidden>배정된 증빙이 없습니다.</div>
         </div>
+        <p id="reviews-result" class="result" hidden></p>
       </section>
 
       <!-- 전체 회원 내보내기 (data_admin) — 공격 ① 대상 -->
       <section class="view" data-view="export" data-title="전체 회원 내보내기" hidden>
         <div class="eyebrow">Member export</div>
         <h1>전체 회원 내보내기</h1>
-        <p class="sub">데이터 관리자 전용입니다. 요청과 결과는 감사 로그에 기록됩니다.</p>
+        <p class="sub">데이터 관리자 전용입니다. 결과 파일은 서버 내부에 암호화 보관되며 브라우저로 내려받지 않습니다.</p>
         <div class="notice">내보낸 파일은 바로 외부로 나갈 수 없습니다. 외부 제공은 반출 신청과 별도 승인을 거쳐야 합니다.</div>
         <div class="card">
           <h2>내보내기 실행</h2>
@@ -121,14 +154,23 @@
       <section class="view" data-view="approvals" data-title="반출 승인" hidden>
         <div class="eyebrow">Approvals</div>
         <h1>반출 승인</h1>
-        <p class="sub">본인이 신청하지 않은 건만 승인·거절·회수할 수 있습니다. 회원 동의는 서버가 따로 확인합니다.</p>
+        <p class="sub">본인이 신청하지 않은 건만 승인·거절할 수 있습니다. 회원 동의와 파일 무결성은 서버가 다시 확인합니다.</p>
         <div class="tablewrap">
           <table>
-            <thead><tr><th>신청 ID</th><th>신청자</th><th>수신자</th><th>목적</th><th>검사</th><th>만료</th><th>처리</th></tr></thead>
+            <thead><tr><th>신청 ID</th><th>신청자</th><th>수신자</th><th>목적</th><th>상태</th><th>반출 기한</th><th>처리</th></tr></thead>
             <tbody id="approvals-body"></tbody>
           </table>
-          <div class="empty">검토 대기 목록은 3주차에 연결됩니다.</div>
+          <div class="empty" id="approvals-empty" hidden>신청 내역이 없습니다.</div>
         </div>
+        <div class="card mt16">
+          <h2>승인 회수</h2>
+          <p class="muted">승인 후 받은 approval_id 로 회수합니다. 회수하면 수신자는 더 이상 내려받을 수 없습니다.</p>
+          <form class="form inline" id="revoke-form">
+            <label>approval_id<input type="text" name="approval_id" id="revoke-id" required pattern="[0-9a-fA-F-]{36}"></label>
+            <div><button type="submit" class="btn">회수</button></div>
+          </form>
+        </div>
+        <p id="approvals-result" class="result" hidden></p>
       </section>
 
       <div class="footer">PrivacyGate · 개인정보 접근·반출 통제 (시험용 합성 데이터)</div>

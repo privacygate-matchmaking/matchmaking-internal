@@ -86,3 +86,17 @@ def end_session_url(id_token: str) -> str:
     s = get_settings()
     params = {"id_token_hint": id_token, "post_logout_redirect_uri": f"{s.app_base_url}/"}
     return f"{discovery()['end_session_endpoint']}?{urlencode(params)}"
+
+
+def refresh_tokens(refresh_token: str) -> dict:
+    """서버에 보관한 refresh token 으로 access token 을 갱신한다 (브라우저는 관여하지 않음)."""
+    s = get_settings()
+    resp = httpx.post(
+        discovery()["token_endpoint"],
+        data={"grant_type": "refresh_token", "refresh_token": refresh_token},
+        auth=(s.oidc_client_id, s.oidc_client_secret),
+        timeout=5,
+    )
+    if resp.status_code != 200:
+        raise OIDCError("token_refresh_failed")
+    return resp.json()

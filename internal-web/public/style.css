@@ -26,3 +26,12 @@
 .login .brand span{color:var(--blue)}
 a.btn{text-decoration:none;display:inline-block}
 .notice.danger{background:#ffebed;color:#a12d3c;border-color:#f6c9cf;margin:0 0 22px;font-weight:650}
+
+.form.one{grid-template-columns:1fr}
+.form.inline{grid-template-columns:1fr auto;align-items:end}
+.btn.sm{padding:6px 10px;font-size:11px}
+.btn.danger{border-color:#f0c4ca;color:#c23d4d}
+.actions .btn+.btn{margin-left:6px}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+tr.selected td{background:#f3f6ff}
+.result{word-break:break-all}

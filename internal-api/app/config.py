@@ -27,6 +27,12 @@ class Settings:
     session_idle_seconds: int
     session_max_seconds: int
     audit_log_path: str
+    evidence_dir: str = "/data/evidence-storage"
+    evidence_key_path: str = "/run/secrets/evidence_master_key"
+    evidence_max_bytes: int = 2 * 1024 * 1024        # 회원 증빙 PDF 최대 2MiB (외부·중계 계약)
+    evidence_retention_days: int = 7                 # 심사 후 원본 보관 기간
+    evidence_unreviewed_days: int = 30               # 심사 전 원본 최대 보관 기간
+    evidence_purge_seconds: int = 300                # 기한 삭제 작업 주기
 
     @property
     def redirect_uri(self) -> str:
@@ -47,4 +53,9 @@ def get_settings() -> Settings:
         session_idle_seconds=int(os.environ.get("SESSION_IDLE_SECONDS", "1800")),
         session_max_seconds=int(os.environ.get("SESSION_MAX_SECONDS", "28800")),
         audit_log_path=os.environ.get("AUDIT_LOG_PATH", "/var/log/matchmaking/internal-api.json"),
+        evidence_dir=os.environ.get("EVIDENCE_DIR", "/data/evidence-storage"),
+        evidence_key_path=os.environ.get("EVIDENCE_KEY_PATH", "/run/secrets/evidence_master_key"),
+        evidence_retention_days=int(os.environ.get("EVIDENCE_RETENTION_DAYS", "7")),
+        evidence_unreviewed_days=int(os.environ.get("EVIDENCE_UNREVIEWED_DAYS", "30")),
+        evidence_purge_seconds=int(os.environ.get("EVIDENCE_PURGE_SECONDS", "300")),
     )

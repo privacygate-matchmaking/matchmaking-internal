@@ -5,3 +5,4 @@ psycopg[binary,pool]==3.2.3
 PyJWT[crypto]==2.10.1
 cryptography==44.0.0
 # privacygate 공통 모듈은 Dockerfile 에서 ../privacygate 를 설치한다
+python-multipart==0.0.20

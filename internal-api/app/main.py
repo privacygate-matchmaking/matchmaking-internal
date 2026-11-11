@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from privacygate import gate_mode
 from privacygate.web import assert_all_routes_guarded, install
 
-from . import audit, db
+from . import audit, db, jobs
 from .config import get_settings
 from .routers import auth, business, transfer
 
@@ -20,7 +20,9 @@ if gate_mode.is_baseline():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.open_pool(get_settings().database_url)
+    jobs.start()                      # 증빙 기한 삭제 주기 작업
     yield
+    jobs.stop()
     db.close_pool()
 
 

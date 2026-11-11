@@ -1,63 +1,105 @@
 """반출(중계) 화면용 API. 브라우저 → internal-api → transfer-api.
 
-브라우저는 transfer-api 주소도 서비스 인증정보도 모른다. internal-api 가 1차로 역할을 확인하고,
-서버에 보관한 사용자 access token(aud=transfer-api, Keycloak 서명)을 붙여 transfer-api 로 전달한다.
+브라우저는 transfer-api 주소도 서비스 인증정보도 모른다. internal-api 가 1차로 역할(과 담당 관계)을 확인하고,
+서버에 보관한 직원 access token(aud=transfer-api, Keycloak 서명)을 붙여 transfer-api 로 전달한다.
 transfer-api 는 그 토큰으로 신청자·승인자를 직접 확인하고 다시 검사한다 (이중 확인).
-전달 구현은 3주차. 지금은 경로와 허용 역할만 확정한다.
+요청·응답 형식은 외부·중계 연동 계약 v0.5 를 따르며, 중계의 응답(오류 포함)을 그대로 돌려준다.
 """
-from fastapi import APIRouter, Depends
-from fastapi.responses import JSONResponse
-from privacygate.policy import Principal, Role
+import uuid
+from datetime import datetime
 
+from fastapi import APIRouter, Depends, File, Request, UploadFile
+from privacygate.errors import ErrorCode, GateError
+from privacygate.policy import Principal, Role
+from pydantic import BaseModel, Field
+
+from .. import audit, db, transfer_client
 from ..auth.session import require, require_csrf
 
 router = APIRouter(prefix="/api", tags=["transfer"])
 
-
-def _todo() -> JSONResponse:
-    return JSONResponse({"status": "not_implemented", "detail": "3주차 구현 예정"}, status_code=501)
+MAX_UPLOAD = 5 * 1024 * 1024
 
 
-@router.post("/transfer-files")
-def upload_transfer_file(principal: Principal = Depends(require(Role.COUNSELOR)),
-                         _csrf: None = Depends(require_csrf)):
-    """반출할 파일을 transfer-staging 에 올리고 검사 (scan_status: pending → passed/blocked/error)."""
-    return _todo()
+@router.post("/transfer-files", status_code=201)
+async def upload_transfer_file(request: Request, file: UploadFile = File(...),
+                               principal: Principal = Depends(require(Role.COUNSELOR)),
+                               _csrf: None = Depends(require_csrf)):
+    """반출할 파일을 중계 transfer-staging 에 올린다. 검사 결과(scan_status, export_banned)는 중계가 정한다."""
+    data = await file.read(MAX_UPLOAD + 1)
+    if len(data) > MAX_UPLOAD:
+        raise GateError(ErrorCode.INVALID_REQUEST, "upload_too_large")
+    name = "upload.json" if (file.content_type or "").endswith("json") else "upload.bin"
+    resp = transfer_client.call(request, "POST", "/api/transfer-files",
+                                files={"file": (name, data, file.content_type or "application/octet-stream")})
+    (audit.allow(request, target_type="transfer_file") if resp.status_code == 201
+     else audit.deny(request, f"transfer_status_{resp.status_code}"))
+    return transfer_client.relay(resp)
 
 
-@router.post("/export-requests")
-def create_export_request(principal: Principal = Depends(require(Role.COUNSELOR)),
+class ExportRequestIn(BaseModel):
+    file_id: uuid.UUID
+    member_id: uuid.UUID
+    recipient_id: uuid.UUID
+    consent_id: uuid.UUID
+    purpose: str = Field(min_length=1, max_length=64)
+    expires_at: datetime
+
+
+@router.post("/export-requests", status_code=201)
+def create_export_request(body: ExportRequestIn, request: Request,
+                          principal: Principal = Depends(require(Role.COUNSELOR)),
                           _csrf: None = Depends(require_csrf)):
-    """검사 통과(passed) 파일만 신청 가능. 검사 통과는 승인이 아니다."""
-    return _todo()
+    """반출 신청. 내부에서 먼저 '정보 주체가 내 담당 회원인지' 확인한 뒤 중계에 전달한다.
+    검사 통과(passed) 파일만, 반출 기한·동의 확인은 중계가 다시 검사한다."""
+    with db.connection() as conn:
+        assigned = conn.execute("SELECT 1 FROM assignments WHERE user_id = %s AND member_id = %s",
+                                (principal.user_id, body.member_id)).fetchone()
+    if assigned is None:
+        raise GateError(ErrorCode.ACCESS_DENIED, "member_not_assigned")
+    resp = transfer_client.call(request, "POST", "/api/export-requests", json=body.model_dump(mode="json"))
+    (audit.allow(request, target_type="export_request") if resp.status_code == 201
+     else audit.deny(request, f"transfer_status_{resp.status_code}"))
+    return transfer_client.relay(resp)
 
 
 @router.get("/export-requests")
-def list_export_requests(principal: Principal = Depends(require(Role.COUNSELOR, Role.APPROVER))):
-    """counselor: 본인 신청만, approver: 검토 대기 건."""
-    return _todo()
+def list_export_requests(request: Request,
+                         principal: Principal = Depends(require(Role.COUNSELOR, Role.APPROVER))):
+    """counselor: 본인 신청만, approver: 전체 (중계가 토큰으로 구분)."""
+    return transfer_client.relay(transfer_client.call(request, "GET", "/api/export-requests"))
 
 
 @router.get("/export-requests/{request_id}")
-def get_export_request(request_id: str,
+def get_export_request(request_id: uuid.UUID, request: Request,
                        principal: Principal = Depends(require(Role.COUNSELOR, Role.APPROVER))):
-    return _todo()
+    return transfer_client.relay(transfer_client.call(request, "GET", f"/api/export-requests/{request_id}"))
+
+
+def _decide(request: Request, path: str, target: str):
+    resp = transfer_client.call(request, "POST", path, json={})
+    (audit.allow(request, target_type="export_request", target_id=target) if resp.status_code < 400
+     else audit.deny(request, f"transfer_status_{resp.status_code}"))
+    return transfer_client.relay(resp)
 
 
 @router.post("/export-requests/{request_id}/approve")
-def approve_export_request(request_id: str, principal: Principal = Depends(require(Role.APPROVER)),
+def approve_export_request(request_id: uuid.UUID, request: Request,
+                           principal: Principal = Depends(require(Role.APPROVER)),
                            _csrf: None = Depends(require_csrf)):
-    """신청자 = 승인자면 transfer-api 가 거부. 회원 동의는 disclosure-checks 로 따로 확인."""
-    return _todo()
+    """신청자 = 승인자면 중계가 거부. 회원 동의는 중계가 disclosure-checks 로 다시 확인."""
+    return _decide(request, f"/api/export-requests/{request_id}/approve", str(request_id))
 
 
 @router.post("/export-requests/{request_id}/reject")
-def reject_export_request(request_id: str, principal: Principal = Depends(require(Role.APPROVER)),
+def reject_export_request(request_id: uuid.UUID, request: Request,
+                          principal: Principal = Depends(require(Role.APPROVER)),
                           _csrf: None = Depends(require_csrf)):
-    return _todo()
+    return _decide(request, f"/api/export-requests/{request_id}/reject", str(request_id))
 
 
 @router.post("/approvals/{approval_id}/revoke")
-def revoke_approval(approval_id: str, principal: Principal = Depends(require(Role.APPROVER)),
+def revoke_approval(approval_id: uuid.UUID, request: Request,
+                    principal: Principal = Depends(require(Role.APPROVER)),
                     _csrf: None = Depends(require_csrf)):
-    return _todo()
+    return _decide(request, f"/api/approvals/{approval_id}/revoke", str(approval_id))
