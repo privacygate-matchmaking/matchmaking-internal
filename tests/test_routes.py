@@ -25,6 +25,7 @@ EXPECTED = {
     ("POST", "/api/evidence-files"): "service:transfer-api",   # 회원 제출, 중계 경유
     ("GET", "/api/evidence-files"): "roles:data_admin",        # 배정된 증빙 목록 (명세 외 추가)
     ("GET", "/api/internal/my-evidence-files"): "service:transfer-api",            # 명세 외 추가
+    ("POST", "/api/member-exports/{export_id}/transfer-files"): "roles:counselor",  # 명세 외 추가
     ("GET", "/api/internal/my-consents"): "service:transfer-api",                  # 명세 외 추가
     ("POST", "/api/internal/my-consents"): "service:transfer-api",                 # 명세 외 추가
     ("POST", "/api/internal/my-consents/{consent_id}/revoke"): "service:transfer-api",  # 명세 외 추가

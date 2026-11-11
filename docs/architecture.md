@@ -89,14 +89,14 @@
 | 단계 | 행위 | 차단 지점 | 비교 API | PrivacyGate |
 | --- | --- | --- | --- | --- |
 | ① 내부 | counselor_a가 자기 세션으로 `POST /api/admin/member-exports` 직접 호출 | internal-api 역할 검사 (data_admin만) | 200, 전체 회원 파일 생성 | 403 ACCESS_DENIED, 파일 미생성 |
-| 연결 | A가 파일을 반출 대기에 올리고 file_id를 member_b에게 전달 | 검사(scan_status)와 승인(approver, 신청자 제외) 분리 | 승인 없이 대기 | 승인 없으면 전달 대상 아님 |
+| 연결 | A가 `POST /api/member-exports/{export_id}/transfer-files`로 파일을 반출 대기에 올리고 file_id를 member_b에게 전달 | 검사(scan_status)와 승인(approver, 신청자 제외) 분리 | 승인 없이 대기 | 승인 없으면 전달 대상 아님 |
 | ② 외부 | member_b가 자기 정상 승인 건 다운로드 요청의 file_id를 A가 준 값으로 변경 | transfer-api: delivery_id → 승인 파일(file_id·file_version·file_hash)·수신자·동의·만료 검증 | 수신자만 확인해 비승인 파일 반환 | 403 APPROVAL_MISMATCH, 자료 미반환 |
 
-**비교 시연 방식**: 비교 API를 따로 두지 않고 같은 경로를 `.env`의 `GATE_MODE`로 전환한다. `enforce`(기본)는 모든 통제를 적용하고, `baseline`은 위 표의 ①·② 차단 지점만 끈다(로그인·세션·CSRF·감사 로그는 유지). baseline에서 통제를 건너뛴 요청은 감사 로그 reason에 남고 내부 화면 상단에 경고가 뜬다. 시연이 끝나면 enforce로 되돌린다.
+**비교 시연 방식**: 비교 API를 따로 두지 않고 같은 경로를 `.env`의 `GATE_MODE`로 전환한다. `enforce`(기본)는 모든 통제를 적용하고, `baseline`은 위 표의 ①·② 차단 지점만 끈다. ②는 승인·수신자·동의·만료·승인 파일 무결성 검사를 유지하고 "요청 file_id ↔ 승인 파일" 연결 검사만 생략한다(로그인·세션·CSRF·감사 로그도 유지, 외부·중계 연동 계약 v0.5와 같은 범위). baseline에서 통제를 건너뛴 요청은 감사 로그 reason에 남고 내부 화면 상단에 경고가 뜬다. 시연이 끝나면 enforce로 되돌린다.
 
 전체 회원 내보내기 결과 파일은 서버 내부에만 두고 `export_id`와 건수만 응답한다. 브라우저로 내려받는 경로는 두지 않는다.
 
-모든 거부는 trace_id·가명 ID·경로·사유 코드로 JSON 로그에 남고, Wazuh 규칙이 공격 ①②와 같은 계정의 반복 거부(1분 3회)를 경보한다. 차단 여부는 경보가 아니라 API 응답과 파일 상태로 판단한다.
+서버 간 호출은 서비스 토큰 검증에 성공한 요청에 한해 받은 trace_id를 이어 써서 외부 → 중계 → 내부 로그를 하나로 잇는다. 모든 거부는 trace_id·가명 ID·경로·사유 코드로 JSON 로그에 남고, Wazuh 규칙이 공격 ①②와 같은 계정의 반복 거부(1분 3회)를 경보한다. 차단 여부는 경보가 아니라 API 응답과 파일 상태로 판단한다.
 
 ## 6. API 목록
 
@@ -107,6 +107,7 @@
 | internal·external | `/auth/login`, `/auth/callback`, `/auth/logout`, `GET /api/me` | 로그인 | 이번 주 |
 | internal-api | `GET /api/members`, `GET /api/members/{member_id}` | counselor | 2주차 |
 | internal-api | `POST /api/admin/member-exports` | data_admin | 3주차 |
+| internal-api | `POST /api/member-exports/{export_id}/transfer-files` (명세 외 추가: 내보내기 결과 중계 등록) | counselor(본인 내보내기만) | 3주차 |
 | internal-api | `POST /api/evidence-files` | transfer-api 서비스 + 회원 | 2주차 |
 | internal-api | `GET /api/evidence-files` (명세 외 추가: 배정된 증빙 목록), `GET /api/evidence-files/{file_id}/content`, `POST …/{file_id}/review` | data_admin | 2주차 |
 | internal-api | `POST /api/internal/disclosure-checks` | transfer-api 서비스 | 3주차 |
@@ -127,7 +128,9 @@
 | 저장소 | 테이블·내용 | 앱 권한 |
 | --- | --- | --- |
 | matchmaking_business | `users`(user_id=Keycloak sub, 가명 ID, 역할, 활성), `members`, `assignments` | 읽기 |
+| matchmaking_business | `introductions`(소개된 회원 쌍: 동의 등록 가능한 상대) | 읽기 |
 | matchmaking_business | `consents`(consent_id, 상대 회원, 항목, purpose, expires_at, revoked_at) | 읽기·추가·수정 (삭제 불가, 철회는 revoked_at) |
+| matchmaking_business | `member_exports`(export_id, 만든 사람, 건수, 저장 키, file_hash, 중계 file_id) — 파일은 evidence-storage/exports/에 암호문 | 읽기·추가·수정 |
 | matchmaking_business | `evidence_files`(file_id, 저장 키, key_id, file_hash, 배정 심사자, 삭제 기한), `evidence_reviews` | 읽기·쓰기 |
 | matchmaking_business | `login_flows`, `sessions`(세션 ID 해시, CSRF, 토큰은 서버만 보관) | 읽기·쓰기·삭제 |
 | matchmaking_transfer | `transfer_files`(file_id, file_version, file_hash, scan_status), `export_requests`(request_id, requester_id, recipient_id, purpose, consent_id, request_status, expires_at) | 읽기·쓰기 |
@@ -174,7 +177,6 @@ GitHub 조직 `privacygate-matchmaking`에 세 레포를 두고, 같은 상위 �
 
 **열린 질문**
 
-- [ ] 회사 이름 (현재 "PrivacyGate 결혼정보회사(가상)")
 - [ ] 서비스 간 TLS 적용 시점 (2주차 제안), Wazuh 실행 PC (메모리 4GB 이상)
 
 ## 9. 명세 대비 추가·변경 기록
@@ -196,3 +198,9 @@ GitHub 조직 `privacygate-matchmaking`에 세 레포를 두고, 같은 상위 �
 | 관리자 내보내기 결과는 서버 내부 보관, `export_id`·건수만 응답 | 전체 회원 파일이 브라우저로 나가지 않게 함 (내려받기 API 추가 안 함) |
 | 회원 증빙 심사 상태 조회 `GET /api/me/evidence-files` → `GET /api/internal/evidence-submissions` → `GET /api/internal/my-evidence-files` | 회원이 제출 결과를 확인 (상태만, 원본·심사자 정보 없음) |
 | 회원 동의 등록·철회 `/api/me/consents` → `/api/internal/member-consents` → `/api/internal/my-consents` | 동의를 시험 데이터가 아닌 회원 조작으로 관리, 동의 철회 시나리오 시연 |
+| `POST /api/member-exports/{export_id}/transfer-files` (counselor, 본인 내보내기만) | 외부·중계 계약 v0.5의 "내부 백엔드가 파일 바이트를 multipart로 중계에 등록"을 내부에서 구현. 공격 연결 단계 재현 |
+| `introductions` 테이블(소개 관계)과 `member_exports` 테이블 | 외부 동의 화면의 소개 상대(counterparts) 제공, 내보내기 결과 관리 |
+| baseline 범위를 "요청 file_id ↔ 승인 파일 연결 검사만 생략"으로 축소 | 외부·중계 계약 v0.5와 통일 (승인·동의·만료·무결성 검사는 유지) |
+| 서비스 토큰으로 인증된 요청의 `X-Trace-Id` 이어 쓰기 | 외부 → 중계 → 내부 감사 로그를 하나의 trace_id로 연결 |
+| `.gitattributes`로 소스·스크립트 줄바꿈 LF 고정 | Windows 작업 환경에서 `.sh`가 CRLF로 바뀌어 DB 초기화가 깨지는 문제 방지 (외부 레포와 같은 규칙) |
+| 회사 이름 "이음" (realm 표시 이름 "이음 (가상 결혼정보회사)") | 외부 화면과 통일 |

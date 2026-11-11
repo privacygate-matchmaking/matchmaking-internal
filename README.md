@@ -1,6 +1,6 @@
 # matchmaking-internal
 
-PrivacyGate — 내부·외부 공격에 대응하는 개인정보 접근·반출 통제 시스템 (가상 결혼정보회사)
+PrivacyGate — 내부·외부 공격에 대응하는 개인정보 접근·반출 통제 시스템 (가상 결혼정보회사 '이음')
 의 **내부 영역**: 직원 화면(internal-web), 업무 API(internal-api).
 실행 환경(compose)·DB 스키마·infra 는 `privacygate` 레포에 있다.
 

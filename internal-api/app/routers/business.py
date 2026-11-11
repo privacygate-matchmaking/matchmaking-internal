@@ -51,6 +51,19 @@ def create_member_export(request: Request,
     return _todo("3주차")
 
 
+@router.post("/member-exports/{export_id}/transfer-files")
+def register_export_to_transfer(export_id: str, request: Request,
+                                principal: Principal = Depends(require(Role.COUNSELOR)),
+                                _csrf: None = Depends(require_csrf)):
+    """내보내기 결과를 중계 반출 대기 영역에 등록한다 (공격 연결 단계). ※ 명세 외 추가
+    - 본인이 만든 내보내기(member_exports.created_by)만 등록할 수 있다. enforce 에서는 counselor 가
+      내보내기를 만들 수 없으므로 등록할 대상이 없다.
+    - internal-api 가 evidence-storage/exports/ 의 파일을 복호화해 바이트를 multipart 로
+      transfer-api POST /api/transfer-files 에 보낸다 (직원 토큰 첨부). 파일 경로·볼륨은 공유하지 않는다.
+    - 중계 응답의 file_id 를 member_exports.transfer_file_id 에 저장. CSV 는 중계에서 blocked/export_banned 로 등록된다 (3주차)."""
+    return _todo("3주차")
+
+
 # ---------- 증빙 ----------
 @router.post("/evidence-files")
 def submit_evidence(member: Principal = Depends(member_via_transfer)):

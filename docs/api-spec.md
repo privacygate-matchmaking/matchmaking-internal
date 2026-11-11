@@ -5,7 +5,8 @@
 - 사용자 신원(user_id·역할)은 요청 본문이 아니라 **서버 인증 정보**(세션·서명된 토큰)에서 확인한다.
 - 브라우저 접속은 HTTPS 만 받는다 (https://localhost:8080 / 8081 / 8090). 쿠키는 Secure.
 - 상태를 바꾸는 요청(POST)은 `X-CSRF-Token` 헤더와 Origin 검사를 통과해야 한다.
-- 모든 응답에 `X-Trace-Id` 헤더가 붙는다. 감사 로그의 `trace_id` 와 같다.
+- 모든 응답에 `X-Trace-Id` 헤더가 붙는다. 감사 로그의 `trace_id` 와 같다. 서버 간 호출은 서비스 토큰 검증에 성공한 요청에 한해 받은 `X-Trace-Id`(32자리 hex)를 이어 써서 외부 → 중계 → 내부 로그를 하나로 잇는다.
+- ID 는 UUID, 시각은 시간대가 포함된 ISO 8601.
 - 구현 전 경로는 `501 not_implemented` 를 돌려준다. 권한 검사는 501 보다 먼저 일어난다.
 
 ## 인증 (internal-api, external-api 각각)
@@ -24,7 +25,8 @@ Keycloak client: `internal-web`, `external-web` · 쿠키: `internal_session`, `
 | GET | /api/members | counselor | 담당 회원 목록 (허용 항목만) |
 | GET | /api/members/{member_id} | counselor | 담당 회원 상세. 담당이 아니면 404 |
 | POST | /api/admin/member-exports | data_admin | 전체 회원 내보내기 (공격 ① 대상). 결과 파일은 서버 내부에만 두고 `export_id`·건수만 응답 (내려받기 경로 없음) |
-| POST | /api/evidence-files | 서비스: transfer-api + 회원 토큰 | **회원** 증빙 제출 → AES-GCM 암호화 후 evidence-storage (직원은 제출 불가) |
+| POST | /api/member-exports/{export_id}/transfer-files | counselor (본인이 만든 내보내기만) | 내보내기 파일 바이트를 internal-api 가 중계 `POST /api/transfer-files` 에 multipart 로 등록 (공격 연결 단계) ※명세 외 추가 |
+| POST | /api/evidence-files | 서비스: transfer-api + 회원 토큰 | **회원** 증빙 제출 (multipart PDF, 최대 2MiB) → AES-GCM 암호화 후 evidence-storage. 201 `{file_id, status}` (직원은 제출 불가) |
 | GET | /api/evidence-files | data_admin | 나에게 배정된 증빙 목록 (file_id, 회원 가명 ID, 접수일, 상태, 삭제 기한, 원본 내용 없음) ※명세 외 추가 |
 | GET | /api/evidence-files/{file_id}/content | data_admin | 배정된 증빙만, 심사 중에만 열람 |
 | POST | /api/evidence-files/{file_id}/review | data_admin | 심사 결과 저장, 원본 삭제 기한 설정 |
@@ -72,7 +74,23 @@ external-api 에는 업무 DB·증빙 저장소 접근 권한이 없다.
 
 ## 동작 모드 (`GATE_MODE`)
 - `enforce`(기본): 모든 통제 적용.
-- `baseline`(시연 비교용): 공격 ①② 대상 통제만 끈다. ① `POST /api/admin/member-exports` 역할 검사 → 로그인한 직원이면 통과, ② 다운로드 승인 파일 검증 → 수신자만 확인하고 요청 file_id 제공. 로그인·세션·CSRF·감사 로그는 그대로이며, 통제를 건너뛴 요청은 감사 로그 reason 에 `baseline_role_check_off` 등으로 남는다. 내부 화면 상단에 경고가 표시된다.
+- `baseline`(시연 비교용): 공격 ①② 대상 통제만 끈다. ① `POST /api/admin/member-exports` 역할 검사 → 로그인한 직원이면 통과, ② 다운로드의 "요청 file_id ↔ 승인 파일" 연결 검사만 생략 (승인·수신자·동의·만료·승인 파일 무결성 검사는 그대로) → 요청 file_id 의 파일 제공. 로그인·세션·CSRF·감사 로그는 그대로이며, 통제를 건너뛴 요청은 감사 로그 reason 에 `baseline_role_check_off` 등으로 남는다. 내부 화면 상단에 경고가 표시된다.
+
+## 응답 형식 (외부·중계 연동 계약 v0.5 기준)
+
+| 경로 | 입력 → 응답 |
+|---|---|
+| `POST /api/internal/disclosure-checks` | `{member_id, recipient_id, consent_id, purpose, item}` → 허용 `{"allowed": true, "expires_at", "member_pseudo_id"}`, 거부 `{"allowed": false}` 또는 공통 403. 조회 실패·미구현을 허용으로 해석하지 않음. 신청·승인·다운로드마다 재호출 |
+| `POST /api/evidence-files` | multipart PDF(≤2MiB) → 201 `{file_id, status}` |
+| `GET /api/internal/my-evidence-files` | → `{"items": [{file_id, status, created_at, review_result?}]}` (status: submitted / in_review / reviewed / deleted) |
+| `GET /api/internal/my-consents` | → `{"items": [{consent_id, counterpart_pseudo_id, item, purpose, expires_at, revoked_at}], "counterparts": [{counterpart_member_id, counterpart_pseudo_id}]}` (counterparts = 소개된 상대만, `introductions` 테이블) |
+| `POST /api/internal/my-consents` | `{counterpart_member_id, item, purpose, expires_at}` → 201 `{consent_id, ...}`. 소개된 상대인지 내부에서 확인 |
+| `POST /api/internal/my-consents/{consent_id}/revoke` | `{}` → `{consent_id, revoked_at}`. 본인 동의인지 확인 |
+| `POST /api/transfer-files` (중계) | multipart file → 201 `{file_id, file_version, file_hash, scan_status, export_banned}`. 스키마 밖 파일(CSV 등)은 blocked·export_banned |
+| `POST /api/export-requests` (중계) | `{file_id, member_id, recipient_id, consent_id, purpose, expires_at}` → 201 `{request_id}`. 반출 기한 최대 7일, 동의 만료를 넘을 수 없음 |
+| `POST /api/export-requests/{request_id}/approve` (중계) | `{}` → `{request_id, approval_id, delivery_id, expires_at}` |
+
+정상 승인 대상 소개 JSON 키: `member_pseudo_id`, `age_band`, `job_group`, `introduction` (각 1~300자). purpose 는 `introduction`, 동의 item 은 `profile`/`photo`/`contact` (소개 자료 반출은 profile).
 
 ## 상태 값
 - `scan_status`: pending / passed / blocked / error
