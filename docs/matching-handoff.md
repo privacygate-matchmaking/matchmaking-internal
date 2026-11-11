@@ -7,22 +7,23 @@
 - 회원은 소개된 상대(`introductions`)에게만 매칭을 누를 수 있습니다.
 - 두 회원이 **서로** 누르면 매칭 성사 → 양쪽에 프로필 제공 동의가 자동 생성됩니다 (item=`profile`, purpose=`introduction`, 30일).
 - 매칭 취소 시 매칭으로 만든 양쪽 동의가 철회됩니다. 탈퇴 회원은 상대 목록에서 빠집니다.
-- 시드: 회원 1(M-001, 로그인 계정 없음)은 이미 member_b(M-003)에게 매칭을 눌러 둔 상태 → member_b 가 M-001 에게 매칭을 누르면 성사.
+- 시드: A-001(로그인 계정 없음)은 이미 member_b 에게 매칭을 눌러 둔 상태. member_b 는 학력 증빙이 없어 먼저 졸업증명서 제출 → 직원 통과 → A-001 에게 매칭하면 성사.
 
 ## 회원 프로필·증빙 (추가)
-- 매칭 전 상대에게 보이는 정보: `my-matches` 응답의 `card` (회원 코드·만 나이·키·몸무게·학력 구분·학력 증빙 여부·직군·소개). 실명·학교·직장·연락처는 없음.
+- **회원 코드(A-001 등)는 관리자 전용**이라 회원용 응답에서 뺐습니다. 상대 표시는 `counterpart_label` (예: "소개 상대 · 만 32세 · 4년제 대졸")을 써 주세요. (`my-consents` 의 `counterpart_pseudo_id` 도 `counterpart_label` 로 바뀜)
+- 매칭 전 상대에게 보이는 정보: `my-matches` 응답의 `card` = 만 나이·키·몸무게·학력 구분(학교 없음)·소개. 실명·학교·직군·직장·연락처는 없음.
 - **학력 증빙이 통과되어야 매칭 가능**: `can_match=false` 이면 매칭 버튼 대신 "학력 증빙(졸업증명서) 승인 후 매칭할 수 있습니다" 안내. 강제로 눌러도 409 `education_not_verified`.
 - 증빙 제출에 종류 추가: multipart 에 `kind` = `education`(졸업증명서) / `employment`(재직증명서). 생략하면 education. → 회원 화면 증빙 제출에 종류 선택을 넣어 주세요.
 - 매칭·승인 후 받는 소개 자료(JSON 4개 항목, 현재 중계 검사 형식 그대로):
-  `member_pseudo_id`=회원 코드(M-001), `age_band`="만 32세", `job_group`=직군(재직 증빙 통과 시 " · 직장명 (재직 증빙 확인)" 추가),
-  `introduction`="이름 … / 키 …cm · 몸무게 …kg (본인 신고) / 학력 … (학교 전공) · 학력 증빙 확인 / 소개 …"
+  `member_pseudo_id`=실명(회원 코드 아님), `age_band`="만 32세", `job_group`=직군(재직 증빙 통과 시 " · 직장명 (재직 증빙 확인)" 추가),
+  `introduction`="키 …cm · 몸무게 …kg (본인 신고) / 학력 … (학교 전공) · 학력 증빙 확인 / 소개 …"
   → 나중에 항목을 나눠 받고 싶으면 중계 검사 스키마(`PROFILE_FIELDS`)를 늘려 주세요. 내부에서 맞춰 보내겠습니다.
 
 ## internal-api (transfer-api 서비스 토큰 + `X-User-Token` 회원 토큰, 기존 my-consents 와 같은 방식)
 
 | 메서드 | 경로 | 요청 → 응답 |
 |---|---|---|
-| GET | `/api/internal/my-matches` | → `{"items": [{counterpart_member_id, counterpart_pseudo_id, i_matched, they_matched, matched, matched_at}]}` |
+| GET | `/api/internal/my-matches` | → `{"can_match", "items": [{counterpart_member_id, counterpart_label, card, i_matched, they_matched, matched, matched_at}]}` |
 | POST | `/api/internal/my-matches` | `{"counterpart_member_id": "<uuid>"}` → 201 `{counterpart_member_id, matched}` (소개되지 않은 상대 403) |
 | POST | `/api/internal/my-matches/{counterpart_member_id}/cancel` | `{}` → `{counterpart_member_id, cancelled: true, revoked_consents}` (매칭 없음 404) |
 

@@ -9,6 +9,7 @@
 | (Keycloak 운영) | `infra_admin` | Keycloak 관리 콘솔 | 업무 데이터 접근 |
 
 규칙
+- 코드 규칙: 직원 `A-C01`(앞글자 A~Z + 역할 C/D/P/A + 2자리), 회원 `A-001`(A~Z + 3자리, 자동 발급). 코드는 관리자 화면·감사 로그 전용이며 회원 화면에는 나오지 않는다.
 - 신원·역할은 서버 인증 정보(세션, Keycloak 서명 토큰)와 `matchmaking_business.users` 에서 확인한다. 요청 본문의 user_id 는 믿지 않는다.
 - internal-api 는 역할을 매 요청 DB 에서 다시 읽는다 (비활성화·역할 변경 즉시 반영).
 - transfer-api 는 업무 DB 가 없으므로 Keycloak 서명 토큰의 realm 역할로 확인한다. Keycloak 역할과 `users.role` 은 같게 관리한다.

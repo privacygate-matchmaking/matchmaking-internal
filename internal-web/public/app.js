@@ -396,7 +396,7 @@ async function showRequest(id) {
   const prev = $("detail-preview");
   prev.replaceChildren();
   if (r.preview && typeof r.preview === "object") {
-    const names = { member_pseudo_id: "회원", age_band: "나이", job_group: "직군 · 직장", introduction: "상세" };
+    const names = { member_pseudo_id: "이름", age_band: "나이", job_group: "직군 · 직장", introduction: "상세" };
     for (const [k, v] of Object.entries(r.preview)) fact(prev, names[k] || k, typeof v === "string" ? v : JSON.stringify(v), k === "introduction" ? "long" : "");
   } else {
     fact(prev, "미리보기", "표시할 수 없습니다 (검사 미통과 또는 반출 금지 파일)");
@@ -424,7 +424,7 @@ async function decide(id, action) {
 }
 
 async function revoke(label, approvalId) {
-  // 소개 자료 이름(M-001_file1)으로 회수. 이름이 없는 예전 건만 approval_id 로
+  // 소개 자료 이름(A-001_file1)으로 회수. 이름이 없는 예전 건만 approval_id 로
   const res = label
     ? await api("/api/approvals/revoke-by-label", { method: "POST", json: { label } })
     : await api(`/api/approvals/${encodeURIComponent(approvalId)}/revoke`, { method: "POST", json: {} });

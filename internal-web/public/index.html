@@ -91,7 +91,7 @@
 
           <div data-roles="counselor">
             <div class="section-title" id="request-section"><h2>소개 자료 발송</h2><span class="muted">매칭 성사 → 담당 상담이 "발송 요청" → 승인자가 승인하면 상대 회원이 받음</span></div>
-            <div class="notice">소개 자료는 직원이 올리지 않습니다. 회원 상세의 매칭 동의에서 <strong>발송 요청</strong>을 누르면 서버가 회원 정보(회원 코드·만 나이·실명·키·몸무게·학력·직군·소개, 재직 증빙이 통과된 경우 직장)로 자료를 만들어 신청합니다. 연락처·증빙 원본은 들어가지 않습니다.</div>
+            <div class="notice">소개 자료는 직원이 올리지 않습니다. 회원 상세의 매칭 동의에서 <strong>발송 요청</strong>을 누르면 서버가 회원 정보(이름·만 나이·키·몸무게·학력·직군·소개, 재직 증빙이 통과된 경우 직장)로 자료를 만들어 신청합니다. 회원 코드·연락처·증빙 원본은 들어가지 않습니다.</div>
             <p id="request-result" class="result" hidden></p>
             <div class="section-title"><h2>내 발송 신청 내역</h2></div>
             <div class="tablewrap">
@@ -215,9 +215,9 @@
 
           <div class="card mt16">
             <h3>승인 회수</h3>
-            <p class="muted">소개 자료 이름(예: M-001_file1)으로 회수합니다. 목록의 [회수] 버튼을 눌러도 됩니다. 회수하면 받는 회원은 더 이상 내려받을 수 없습니다.</p>
+            <p class="muted">소개 자료 이름(예: A-001_file1)으로 회수합니다. 목록의 [회수] 버튼을 눌러도 됩니다. 회수하면 받는 회원은 더 이상 내려받을 수 없습니다.</p>
             <form class="form inline" id="revoke-form">
-              <label>소개 자료 이름<input type="text" name="label" id="revoke-id" required placeholder="M-001_file1" pattern="[A-Za-z0-9-]{1,32}_file[0-9]{1,6}"></label>
+              <label>소개 자료 이름<input type="text" name="label" id="revoke-id" required placeholder="A-001_file1" pattern="[A-Za-z0-9-]{1,32}_file[0-9]{1,6}"></label>
               <div><button type="submit" class="btn danger">회수</button></div>
             </form>
           </div>

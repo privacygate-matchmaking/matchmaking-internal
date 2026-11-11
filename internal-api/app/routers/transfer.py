@@ -89,7 +89,7 @@ def get_export_request(request_id: uuid.UUID, request: Request,
 
 
 def _with_labels(items: list[dict]) -> None:
-    """화면용 짧은 이름: 소개 자료 이름(M-001_file1), 동의 번호(C-n), 알고 있는 approval_id."""
+    """화면용 짧은 이름: 소개 자료 이름(A-001_file1), 동의 번호(C-n), 알고 있는 approval_id."""
     req_ids = [str(it["request_id"]) for it in items if it.get("request_id")]
     con_ids = [str(it["consent_id"]) for it in items if it.get("consent_id")]
     if not req_ids:
@@ -111,7 +111,7 @@ def _with_labels(items: list[dict]) -> None:
 
 
 def _with_pseudo_ids(items: list[dict]) -> None:
-    """중계 응답의 user_id·member_id(UUID) 옆에 화면용 가명 ID 를 붙인다 (예: S-C01, M-001, M-B01).
+    """중계 응답의 user_id·member_id(UUID) 옆에 화면용 가명 ID 를 붙인다 (예: A-C01, A-001).
     판단에는 쓰지 않는 표시 정보이며, 없는 값은 붙이지 않는다."""
     ids = {str(v) for it in items for k in ("requester_id", "recipient_id", "member_id") if (v := it.get(k))}
     if not ids:
@@ -177,7 +177,7 @@ class RevokeByLabelIn(BaseModel):
 def revoke_by_label(body: RevokeByLabelIn, request: Request,
                     principal: Principal = Depends(require(Role.APPROVER)),
                     _csrf: None = Depends(require_csrf)):
-    """소개 자료 이름(예: M-001_file1)으로 승인 회수. 이름 → approval_id 는 내부 DB 에서 찾는다. ※ 명세 외 추가"""
+    """소개 자료 이름(예: A-001_file1)으로 승인 회수. 이름 → approval_id 는 내부 DB 에서 찾는다. ※ 명세 외 추가"""
     with db.connection() as conn:
         row = conn.execute("SELECT approval_id FROM intro_files WHERE label = %s", (body.label,)).fetchone()
     if row is None or row["approval_id"] is None:

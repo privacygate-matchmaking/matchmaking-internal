@@ -137,7 +137,7 @@ def get_member(member_id: uuid.UUID, request: Request,
                  FROM consents c JOIN members cm ON cm.member_id = c.counterpart_member_id
                 WHERE c.member_id = %s ORDER BY c.granted_at DESC""",
             (member_id,)).fetchall()
-        matches = _match_rows(conn, member_id)
+        matches = _match_rows(conn, member_id, staff=True)
     audit.allow(request, target_type="member", target_id=m["pseudo_id"])
     return {**_profile(m), "withdrawn_at": _iso(m["withdrawn_at"]),
             "consents": [{"consent_id": str(c["consent_id"]), "consent_label": f"C-{c['consent_no']}",
@@ -223,7 +223,8 @@ def withdraw_member(member_id: uuid.UUID, request: Request,
 # ======================================================================
 def _detail_profile(m, name: str) -> dict:
     """매칭·동의 후 상대에게 주는 소개 자료.
-    중계 검사 형식(4개 항목, 각 300자 이하)에 맞춘다: member_pseudo_id 는 회원 코드, age_band 자리에 만 나이.
+    중계 검사 형식(4개 항목, 각 300자 이하)에 맞춘다: member_pseudo_id 자리에 실명(회원 코드는 관리자 전용이라 넣지 않음),
+    age_band 자리에 만 나이.
     직장은 재직 증빙이 통과된 경우에만 넣는다. 연락처·증빙 원본은 넣지 않는다."""
     age = _age(m["birth_date"])
     edu = m["education_level"] or "비공개"
@@ -234,11 +235,10 @@ def _detail_profile(m, name: str) -> dict:
     if m["employment_verified"] and m["company"]:
         job += f" · {m['company']} (재직 증빙 확인)"
     body = " / ".join(x for x in [
-        f"이름 {name}",
         f"키 {m['height_cm']}cm · 몸무게 {m['weight_kg']}kg (본인 신고)" if m["height_cm"] else None,
         f"학력 {edu}",
         f"소개 {m['introduction']}" if m["introduction"] else None] if x)
-    return {"member_pseudo_id": m["pseudo_id"], "age_band": f"만 {age}세" if age is not None else "비공개",
+    return {"member_pseudo_id": name[:300], "age_band": f"만 {age}세" if age is not None else "비공개",
             "job_group": job[:300], "introduction": body[:300]}
 
 
@@ -252,7 +252,7 @@ def request_introduction(member_id: uuid.UUID, body: IntroductionIn, request: Re
                          _csrf: None = Depends(require_csrf)):
     """매칭으로 생긴 유효 동의(이 회원 → 상대)로 소개 자료 발송을 요청한다. ※ 명세 외 추가
     1) 담당 회원·유효 동의·상대 외부 계정 확인
-    2) 소개 자료(회원 코드·만 나이·실명·키·몸무게·학력·직군·(재직 확인 시)직장·소개)를 회원 DB 에서 만든다
+    2) 소개 자료(실명·만 나이·키·몸무게·학력·직군·(재직 확인 시)직장·소개)를 회원 DB 에서 만든다
        — 연락처·증빙 원본은 넣지 않는다
     3) 중계에 파일 등록(형식 검사) → 발송 신청(승인 대기). 승인은 다른 승인자가 한다."""
     with db.connection() as conn:
@@ -274,7 +274,7 @@ def request_introduction(member_id: uuid.UUID, body: IntroductionIn, request: Re
                            (member_id,)).fetchone()["n"]
     profile = _detail_profile(m, name)
     data = json.dumps(profile, ensure_ascii=False).encode("utf-8")
-    label = f"{m['pseudo_id']}_file{seq}"                      # 화면용 이름 (예: M-001_file1)
+    label = f"{m['pseudo_id']}_file{seq}"                      # 관리자 화면용 이름 (예: A-001_file1)
     up = transfer_client.call(request, "POST", "/api/transfer-files",
                               files={"file": (f"{label}.json", data, "application/json")})
     if up.status_code != 201:
@@ -542,20 +542,22 @@ def my_consents(request: Request, member: Principal = Depends(member_via_transfe
     owner = _member_of(member.user_id)
     with db.connection() as conn:
         items = conn.execute(
-            """SELECT c.consent_id, c.consent_no, cm.pseudo_id, c.item, c.purpose, c.expires_at, c.revoked_at
+            """SELECT c.consent_id, c.consent_no, cm.birth_date, cm.education_level,
+                      c.item, c.purpose, c.expires_at, c.revoked_at
                  FROM consents c JOIN members cm ON cm.member_id = c.counterpart_member_id
                 WHERE c.member_id = %s ORDER BY c.granted_at DESC""", (owner["member_id"],)).fetchall()
         counterparts = conn.execute(
-            """SELECT cm.member_id, cm.pseudo_id FROM introductions i
+            """SELECT cm.member_id, cm.birth_date, cm.education_level FROM introductions i
                  JOIN members cm ON cm.member_id = i.counterpart_member_id
-                WHERE i.member_id = %s AND cm.status = 'active' ORDER BY cm.pseudo_id""", (owner["member_id"],)).fetchall()
+                WHERE i.member_id = %s AND cm.status = 'active' ORDER BY cm.created_at""", (owner["member_id"],)).fetchall()
     audit.allow(request, target_type="consent_list")
     return {"items": [{"consent_id": str(c["consent_id"]), "consent_label": f"C-{c['consent_no']}",
-                       "counterpart_pseudo_id": c["pseudo_id"],
+                       "counterpart_label": _public_label(c["birth_date"], c["education_level"]),
                        "item": c["item"], "purpose": c["purpose"], "expires_at": _iso(c["expires_at"]),
                        "revoked_at": _iso(c["revoked_at"])} for c in items],
             "counterparts": [{"counterpart_member_id": str(c["member_id"]),
-                              "counterpart_pseudo_id": c["pseudo_id"]} for c in counterparts]}
+                              "counterpart_label": _public_label(c["birth_date"], c["education_level"])}
+                             for c in counterparts]}
 
 
 class ConsentIn(BaseModel):
@@ -611,8 +613,20 @@ MATCH_CONSENT_PURPOSE = "introduction"
 MATCH_CONSENT_DAYS = 30
 
 
-def _match_rows(conn, member_id) -> list[dict]:
-    """소개된 상대별 매칭 상태: 내가 눌렀는지, 상대가 눌렀는지, 성사 여부."""
+def _public_label(birth_date, education_level) -> str:
+    """회원 화면용 상대 표시 (회원 코드·실명 대신). 예: '소개 상대 · 만 32세 · 4년제 대졸'"""
+    parts = ["소개 상대"]
+    age = _age(birth_date)
+    if age is not None:
+        parts.append(f"만 {age}세")
+    if education_level:
+        parts.append(education_level)
+    return " · ".join(parts)
+
+
+def _match_rows(conn, member_id, staff: bool = False) -> list[dict]:
+    """소개된 상대별 매칭 상태: 내가 눌렀는지, 상대가 눌렀는지, 성사 여부.
+    회원용(staff=False)에는 회원 코드를 넣지 않는다 (코드는 관리자 전용)."""
     rows = conn.execute(
         """SELECT cm.member_id, cm.pseudo_id, cm.birth_date, cm.height_cm, cm.weight_kg,
                   cm.education_level, cm.education_verified, cm.job_group, cm.introduction,
@@ -624,12 +638,12 @@ def _match_rows(conn, member_id) -> list[dict]:
              LEFT JOIN matches theirs ON theirs.member_id = cm.member_id AND theirs.counterpart_member_id = i.member_id
                                      AND theirs.cancelled_at IS NULL
             WHERE i.member_id = %s ORDER BY cm.pseudo_id""", (member_id,)).fetchall()
-    return [{"counterpart_member_id": str(r["member_id"]), "counterpart_pseudo_id": r["pseudo_id"],
-             # 매칭 전 공개 카드: 회원 코드·만 나이·키·몸무게·학력 구분·직군·소개 (실명·학교·직장·연락처 없음)
-             "card": {"pseudo_id": r["pseudo_id"], "age": _age(r["birth_date"]), "height_cm": r["height_cm"],
-                      "weight_kg": r["weight_kg"], "education_level": r["education_level"],
-                      "education_verified": r["education_verified"], "job_group": r["job_group"],
-                      "introduction": r["introduction"]},
+    return [{"counterpart_member_id": str(r["member_id"]),
+             **({"counterpart_pseudo_id": r["pseudo_id"]} if staff else {}),
+             "counterpart_label": _public_label(r["birth_date"], r["education_level"]),
+             # 매칭 전 공개 카드: 만 나이·키·몸무게·학력 구분(학교 없음)·소개 (회원 코드·실명·학교·직장·연락처 없음)
+             "card": {"age": _age(r["birth_date"]), "height_cm": r["height_cm"], "weight_kg": r["weight_kg"],
+                      "education_level": r["education_level"], "introduction": r["introduction"]},
              "i_matched": r["i_at"] is not None, "they_matched": r["they_at"] is not None,
              "matched": r["i_at"] is not None and r["they_at"] is not None,
              "matched_at": _iso(max(r["i_at"], r["they_at"])) if r["i_at"] and r["they_at"] else None}
