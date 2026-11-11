@@ -26,8 +26,7 @@
   - transfer-api `/api/internal/*` ← `external-api` (+ 회원 access token)
 
 인증
-- 직원: ID·비밀번호 + TOTP (첫 로그인에 OTP 등록 강제), 회원: ID·비밀번호
-  - 개발 중에만 `.env` 의 `REQUIRE_STAFF_OTP=false` 로 끌 수 있다. 기본값과 시연·평가는 `true`.
+- 직원·회원 모두 ID·비밀번호 (OTP 사용 안 함)
 - 5회 실패 시 잠금(점증 대기), 비밀번호 12자 이상
 - 세션: 유휴 30분, 최대 8시간, 로그인마다 새 세션 ID, 로그아웃 시 서버 세션·Keycloak 세션 종료
 - 브라우저 구간은 HTTPS 만 (internal-web·external-web·Keycloak 8443), 세션 쿠키 Secure·HttpOnly·SameSite=Strict

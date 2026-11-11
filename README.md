@@ -34,7 +34,7 @@ docker compose up -d --build                     # 내부만 (keycloak, internal
 
 HTTPS 인증서는 `init-env.sh` 가 만든다. [mkcert](https://github.com/FiloSottile/mkcert) 가 설치돼 있으면(`mkcert -install` 한 번) 브라우저 경고가 없고, 없으면 자체 서명이라 처음 한 번 '계속 진행'이 필요하다.
 
-시험 계정 `counselor_a`, `data_admin`, `approver`, `member_b` — 비밀번호는 `.env` 의 `KC_TEST_PASSWORD`. 직원은 첫 로그인 때 OTP 앱 등록.
+시험 계정 `counselor_a`, `counselor_b`, `data_admin`(총관리자), `approver`, `member_b` — 비밀번호는 `.env` 의 `KC_TEST_PASSWORD`.
 
 ## 시험
 

@@ -23,7 +23,7 @@
 | transfer-staging / transfer-verified | 중계 | 검사 전 파일 / 검사 통과 파일 | Docker 볼륨 | — |
 | external-api | 외부 | 회원 로그인(BFF), transfer-api만 호출 | FastAPI | matchmaking-external |
 | external-web | 외부 | 회원 화면: 증빙 제출·전달 목록·다운로드·거부·만료 안내 | HTML/JS, Nginx | matchmaking-external |
-| keycloak | 인증 | OIDC 로그인, 직원 TOTP, 서비스 계정 | Keycloak 26 | privacygate/infra |
+| keycloak | 인증 | OIDC 로그인, 서비스 계정 | Keycloak 26 | privacygate/infra |
 | wazuh | 관제 | JSON 로그 수집·규칙·경보 | Wazuh 4 (선택 실행) | privacygate/infra |
 
 공통 보안 모듈 `privacygate`(Python 패키지)는 internal-api와 transfer-api가 함께 쓴다: 역할 판단, 직무 분리, 세션·CSRF 규칙, 오류 응답 형식, 감사 로그, 승인 파일 검증(`delivery_problem`), 기본 거부 경로 검사.
@@ -53,14 +53,14 @@
 **직원 로그인 (Authorization Code + PKCE)**
 
 1. internal-web에서 로그인 → internal-api `/auth/login`이 state·nonce·PKCE verifier를 만들어 서버에 저장하고 Keycloak(client `internal-web`)으로 보낸다.
-2. Keycloak에서 ID·비밀번호와 TOTP를 입력한다.
+2. Keycloak에서 ID·비밀번호를 입력한다.
 3. `/auth/callback`에서 code와 verifier로 토큰을 교환하고 ID 토큰의 서명·iss·aud·exp·nonce를 검증한다.
 4. `sub`(= `user_id`)로 `users` 테이블을 조회해 활성 직원인지 확인하고 서버 세션을 만든다.
 5. 브라우저에는 무작위 세션 ID만 `internal_session` 쿠키(HttpOnly·Secure·SameSite=Strict)로 준다.
 
-직원 OTP는 기본으로 켜져 있고, 개발 중에만 `.env`의 `REQUIRE_STAFF_OTP=false`로 끌 수 있다(keycloak-setup 일회성 작업이 적용). 시연·평가는 반드시 `true`로 한다.
+직원·회원 모두 OTP 없이 ID·비밀번호로 로그인한다 (5회 실패 잠금·비밀번호 정책은 유지).
 
-회원은 external-api가 같은 방식(client `external-web`, 쿠키 `external_session`)으로 처리하고 TOTP 없이 ID·비밀번호만 쓴다.
+회원은 external-api가 같은 방식(client `external-web`, 쿠키 `external_session`)으로 처리하고 ID·비밀번호만 쓴다.
 
 **인가 원칙**
 
@@ -161,13 +161,13 @@ GitHub 조직 `privacygate-matchmaking`에 세 레포를 두고, 같은 상위 �
 | https://localhost:8081 | keycloak | 로그인 화면, 관리 콘솔 `/admin` (infra_admin) |
 | https://localhost:8090 | external-web | 회원 화면 |
 
-시험 계정: `counselor_a`(내부 공격자 A), `data_admin`, `approver`, `member_b`(외부 공범 B). 직원은 첫 로그인 때 OTP를 등록한다.
+시험 계정: `counselor_a`(내부 공격자 A), `counselor_b`, `data_admin`(총관리자), `approver`, `member_b`(외부 공범 B).
 
 **이번 주(11/02~11/08)**
 
 - [x] 명칭 규칙 반영: 레포·서비스·DB·저장소·네트워크·역할·필드·API·오류 코드
 - [x] 실행 환경·DB 스키마·infra 를 `privacygate` 레포로 모음 (패키지는 `src/` 에 그대로, 이미지에는 패키지 파일만 복사)
-- [x] compose 실행 환경, Keycloak realm `matchmaking`(PKCE S256, 직원 TOTP, 5회 실패 잠금, 서비스 계정)
+- [x] compose 실행 환경, Keycloak realm `matchmaking`(PKCE S256, 5회 실패 잠금, 서비스 계정)
 - [x] 업무·중계 DB 스키마, 앱 계정 분리, 감사 테이블 추가 전용
 - [x] internal-api: 로그인·서버 세션·CSRF·역할 재확인·감사 로그·공통 오류, 모든 경로 권한 선언
 - [x] transfer-api·external-api 뼈대 (경로·허용 호출자 선언)
@@ -191,7 +191,6 @@ GitHub 조직 `privacygate-matchmaking`에 세 레포를 두고, 같은 상위 �
 | internal-api의 반출 경로(`/api/export-requests` 등) 전달 | 직원 화면이 서비스 인증정보 없이 중계를 호출하도록 internal-api가 직원 토큰을 붙여 전달 |
 | 실행 환경·DB 스키마·infra를 `privacygate` 레포에 둠 | 기존 레포 운영 방식 유지 (패키지는 `src/`, 이미지에는 패키지 파일만 복사) |
 | 회원 증빙 제출 경로 `POST /api/me/evidence-files`(external-api), `POST /api/internal/evidence-submissions`(transfer-api) | 증빙은 회원이 제출하며 external-api는 증빙 저장소에 닿을 수 없으므로 중계를 거침 |
-| 개발용 직원 OTP 끄기 `REQUIRE_STAFF_OTP` (기본 true) | 개발 편의. 시연·평가는 반드시 켬 |
 | 직원 로그인 테마(한국어), internal-web 클라이언트에만 적용 | 직원 화면과 같은 디자인, 회원 화면은 팀원 담당 |
 | `GET /api/evidence-files` (data_admin, 배정된 증빙 목록) | 심사자가 열람할 file_id를 알기 위해 필요. 원본 내용은 포함하지 않음 |
 | 비교 시연 모드 `GATE_MODE=enforce/baseline` (API 추가 없음) | 제안서의 "비교 API vs PrivacyGate"를 같은 경로에서 전환해 비교. 기본 enforce |
@@ -223,3 +222,4 @@ GitHub 조직 `privacygate-matchmaking`에 세 레포를 두고, 같은 상위 �
 | 매칭 전 공개 정보를 만 나이·키·몸무게·학력 구분·소개로 한정, 소개 자료(매칭·승인 후)에는 실명 포함 | 단계별 최소 공개. 학교·직장은 매칭 후, 직장은 재직 증빙 통과 시만 |
 | 시험 데이터 전면 교체 (회원 10명, 새 코드 규칙) | 프로필·증빙 규칙 변경에 맞춰 시드 재작성. 초기화는 `down -v` 후 재기동 |
 | 회원 성별(`gender`) 추가, 직원 화면에 이름·성별 표시 | 담당 직원·총관리자가 회원을 식별·관리하기 위해 필요 (연락처는 계속 비표시) |
+| 직원 OTP(TOTP) 제거, ID·비밀번호 로그인 | 팀 결정. 계정 보호는 비밀번호 정책·5회 실패 잠금·세션 통제로 유지 (명세서의 직원 TOTP 항목 변경) |
