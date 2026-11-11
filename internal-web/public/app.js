@@ -157,6 +157,8 @@ function withMark(text, ok) {
   if (ok) d.append(el("span", "✓ 증빙", "ok-mark"));
   return d;
 }
+// 직원 화면용: A-003(박도윤)
+const withName = (code, name) => (name ? `${code}(${name})` : code);
 const ageText = (m) => (m.age != null ? `만 ${m.age}세` : "-");
 
 // ---- 표 정렬·검색 (화면에서만, 서버가 준 목록 안에서) ----
@@ -242,11 +244,11 @@ async function showMember(memberId) {
   fact(f, "소개", m.introduction ?? "-", "long");
   const yes = (v) => el("span", v ? "매칭함" : "-", v ? "pill" : "muted");
   fill("matches-body", "matches-empty", m.matches.map((x) =>
-    row([x.counterpart_pseudo_id, yes(x.i_matched), yes(x.they_matched),
+    row([withName(x.counterpart_pseudo_id, x.counterpart_name), yes(x.i_matched), yes(x.they_matched),
          x.matched ? el("span", "매칭 성사", "pill green") : el("span", "대기", "muted")])));
   const counselor = isCounselor();
   fill("consents-body", "consents-empty", m.consents.map((c) => {
-    const cells = [c.counterpart_pseudo_id, c.item, c.purpose, toKst(c.expires_at),
+    const cells = [withName(c.counterpart_pseudo_id, c.counterpart_name), c.item, c.purpose, toKst(c.expires_at),
                    pill(c.revoked_at ? "revoked" : c.valid ? "approved" : "rejected")];
     if (counselor) cells.push(c.valid && m.status === "active"
       ? actions(button("발송 요청", () => requestIntroduction(m, c), "btn sm primary")) : "-");

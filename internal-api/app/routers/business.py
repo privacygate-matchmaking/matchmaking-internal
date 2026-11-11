@@ -132,7 +132,7 @@ def get_member(member_id: uuid.UUID, request: Request,
         m = _member_in_scope(conn, principal, member_id)
         consents = conn.execute(
             """SELECT c.consent_id, c.consent_no, c.item, c.purpose, c.expires_at, c.revoked_at,
-                      cm.pseudo_id AS counterpart_pseudo_id,
+                      cm.pseudo_id AS counterpart_pseudo_id, cm.name AS counterpart_name,
                       cm.user_id AS recipient_id
                  FROM consents c JOIN members cm ON cm.member_id = c.counterpart_member_id
                 WHERE c.member_id = %s ORDER BY c.granted_at DESC""",
@@ -143,6 +143,7 @@ def get_member(member_id: uuid.UUID, request: Request,
             "consents": [{"consent_id": str(c["consent_id"]), "consent_label": f"C-{c['consent_no']}",
                           "item": c["item"], "purpose": c["purpose"],
                           "counterpart_pseudo_id": c["counterpart_pseudo_id"],
+                          "counterpart_name": c["counterpart_name"],
                           "recipient_id": str(c["recipient_id"]) if c["recipient_id"] else None,
                           "expires_at": _iso(c["expires_at"]), "revoked_at": _iso(c["revoked_at"]),
                           "valid": c["revoked_at"] is None and c["expires_at"] > _now()}
@@ -632,7 +633,7 @@ def _match_rows(conn, member_id, staff: bool = False) -> list[dict]:
     """소개된 상대별 매칭 상태: 내가 눌렀는지, 상대가 눌렀는지, 성사 여부.
     회원용(staff=False)에는 회원 코드를 넣지 않는다 (코드는 관리자 전용)."""
     rows = conn.execute(
-        """SELECT cm.member_id, cm.pseudo_id, cm.birth_date, cm.height_cm, cm.weight_kg,
+        """SELECT cm.member_id, cm.pseudo_id, cm.name, cm.birth_date, cm.height_cm, cm.weight_kg,
                   cm.education_level, cm.education_verified, cm.job_group, cm.introduction,
                   mine.created_at AS i_at, theirs.created_at AS they_at
              FROM introductions i
@@ -643,7 +644,7 @@ def _match_rows(conn, member_id, staff: bool = False) -> list[dict]:
                                      AND theirs.cancelled_at IS NULL
             WHERE i.member_id = %s ORDER BY cm.pseudo_id""", (member_id,)).fetchall()
     return [{"counterpart_member_id": str(r["member_id"]),
-             **({"counterpart_pseudo_id": r["pseudo_id"]} if staff else {}),
+             **({"counterpart_pseudo_id": r["pseudo_id"], "counterpart_name": r["name"]} if staff else {}),
              "counterpart_label": _public_label(r["birth_date"], r["education_level"]),
              # 매칭 전 공개 카드: 만 나이·키·몸무게·학력 구분(학교 없음)·소개 (회원 코드·실명·학교·직장·연락처 없음)
              "card": {"age": _age(r["birth_date"]), "height_cm": r["height_cm"], "weight_kg": r["weight_kg"],
