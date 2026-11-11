@@ -26,6 +26,7 @@ Keycloak client: `internal-web`, `external-web` · 쿠키: `internal_session`, `
 | GET | /api/members/{member_id} | counselor(담당 회원), data_admin(전체) | 회원 상세(동의·매칭 현황). 범위 밖이면 404 |
 | POST | /api/admin/member-exports | data_admin | 전체 회원 내보내기 (공격 ① 대상). 결과 파일은 서버 내부에만 두고 `export_id`·건수만 응답 (내려받기 경로 없음) |
 | PATCH | /api/members/{member_id} | counselor(담당 회원), data_admin(전체) | 회원 정보 수정 — 출생연도·직업만, 탈퇴 회원 불가 ※명세 외 추가 |
+| POST | /api/members/{member_id}/introductions | counselor(담당 회원) | 매칭 동의(consent_id)로 소개 자료 발송 요청. 서버가 회원 DB 로 소개 JSON 을 만들어 중계에 등록·신청 (직원 업로드 없음) ※명세 외 추가 |
 | POST | /api/members/{member_id}/withdraw | counselor(담당 회원), data_admin(전체) | 탈퇴 처리 — 이름·연락처 삭제, 상태 withdrawn, 주고받은 동의 철회·매칭 취소 (행·기록은 유지) ※명세 외 추가 |
 | GET | /api/admin/member-exports | data_admin (총관리자) | 전체 회원 내보내기 내역 (실행 직원·건수·중계 등록 여부, 파일 내용 없음) ※명세 외 추가 |
 | POST | /api/member-exports/{export_id}/transfer-files | counselor (본인이 만든 내보내기만) | 내보내기 파일 바이트를 internal-api 가 중계 `POST /api/transfer-files` 에 multipart 로 등록 (공격 연결 단계) ※명세 외 추가 |
@@ -86,6 +87,7 @@ external-api 에는 업무 DB·증빙 저장소 접근 권한이 없다.
 | `GET /api/members/{member_id}` | → `{member_id, pseudo_id, birth_year, job, consents: [{consent_id, item, purpose, counterpart_pseudo_id, recipient_id, expires_at, revoked_at, valid}]}`. 담당 아니면 404 |
 | `GET /api/members` | → `{"items": [{member_id, pseudo_id, birth_year, job, status, has_account, counselors, valid_consents, open_evidence, created_at}]}` (counselor: 담당 회원, data_admin: 전체) |
 | `PATCH /api/members/{member_id}` | `{birth_year?, job?}` → `{member_id, birth_year, job}` |
+| `POST /api/members/{member_id}/introductions` | `{consent_id}` → 201 `{request_id, request_status, created_at, file_id, profile}` (profile = 중계에 보낸 소개 JSON) |
 | `POST /api/members/{member_id}/withdraw` | `{}` → `{member_id, status: "withdrawn", revoked_consents}` |
 | `GET /api/internal/my-matches` | → `{"items": [{counterpart_member_id, counterpart_pseudo_id, i_matched, they_matched, matched, matched_at}]}` (소개된 상대만) |
 | `POST /api/internal/my-matches` | `{counterpart_member_id}` → 201 `{counterpart_member_id, matched}`. 서로 누르면 양쪽 프로필 제공 동의(item=profile, purpose=introduction, 30일) 자동 생성 |

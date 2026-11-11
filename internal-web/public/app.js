@@ -176,7 +176,7 @@ async function showMember(memberId) {
     const cells = [c.counterpart_pseudo_id, c.item, c.purpose, toKst(c.expires_at),
                    pill(c.revoked_at ? "revoked" : c.valid ? "approved" : "rejected")];
     if (counselor) cells.push(c.valid && m.status === "active"
-      ? actions(button("이 상대에게 발송", () => prefillRequest(m.member_id, c.consent_id))) : "-");
+      ? actions(button("발송 요청", () => requestIntroduction(m, c), "btn sm primary")) : "-");
     return row(cells);
   }));
   box.hidden = false;
@@ -187,96 +187,21 @@ function alertInline(node, text) { node.textContent = text; node.hidden = false;
 
 // ---- 반출 신청 (counselor) ----
 async function loadRequests() {
-  if (!state.members.length) {
-    try { state.members = (await getJson("/api/members")).items; } catch (_) { state.members = []; }
-  }
-  const sel = $("req-member");
-  const keep = sel.value;
-  sel.replaceChildren(el("option", "회원 선택"), ...state.members.filter((m) => m.status !== "withdrawn").map((m) => {
-    const o = el("option", `${m.pseudo_id} (${m.job})`); o.value = m.member_id; return o;
-  }));
-  sel.firstChild.value = "";
-  sel.value = keep;
-  await fillConsents(sel.value);
-
   const { items } = await getJson("/api/export-requests");
   fill("requests-body", "requests-empty", items.map((r) =>
     row([mono(short(r.request_id)), mono(short(r.file_id)), r.purpose, pill(r.request_status),
          toKst(r.expires_at), toKst(r.created_at)])));
 }
 
-async function fillConsents(memberId, selectId) {
-  const sel = $("req-consent");
-  sel.replaceChildren(el("option", memberId ? "동의 선택" : "회원을 먼저 선택"));
-  sel.firstChild.value = "";
-  if (!memberId) return;
-  if (!state.consents[memberId]) {
-    try { state.consents[memberId] = (await getJson(`/api/members/${memberId}`)).consents; } catch (_) { return; }
-  }
-  for (const c of state.consents[memberId].filter((x) => x.valid && x.recipient_id)) {
-    const o = el("option", `→ ${c.counterpart_pseudo_id} · ${c.purpose} · ~${toKst(c.expires_at)}`);
-    o.value = c.consent_id;
-    o.dataset.recipient = c.recipient_id;
-    o.dataset.purpose = c.purpose;
-    sel.appendChild(o);
-  }
-  if (selectId) sel.value = selectId;
-}
-
-async function prefillRequest(memberId, consentId) {
-  $("request-section").scrollIntoView({ behavior: "smooth" });
-  $("req-member").value = memberId;
-  await fillConsents(memberId, consentId);
-  syncPurpose();
-}
-
-function syncPurpose() {
-  const opt = $("req-consent").selectedOptions[0];
-  if (opt && opt.dataset.purpose) $("request-form").elements.purpose.value = opt.dataset.purpose;
-}
-
-async function uploadFile(ev) {
-  ev.preventDefault();
-  const form = ev.target;
-  const out = $("upload-result");
-  const data = new FormData();
-  data.append("file", form.elements.file.files[0]);
-  const res = await api("/api/transfer-files", { method: "POST", body: data });
-  if (!res.ok) return showResult(out, await describe(res), false);
-  const f = await res.json();
-  const passed = f.scan_status === "passed" && !f.export_banned;
-  showResult(out, `file_id ${f.file_id} · 검사 ${STATUS[f.scan_status]?.[0] || f.scan_status}` +
-    (f.export_banned ? " · 반출 금지" : ""), passed);
-  if (passed) $("request-form").elements.file_id.value = f.file_id;
-}
-
-async function createRequest(ev) {
-  ev.preventDefault();
-  const f = ev.target.elements;
+// 매칭 동의로 소개 자료 발송 요청: 자료는 서버가 회원 DB 로 만든다
+async function requestIntroduction(m, c) {
   const out = $("request-result");
-  const opt = $("req-consent").selectedOptions[0];
-  if (!opt || !opt.dataset.recipient) return showResult(out, "유효한 동의를 선택하세요.", false);
-  const expires = new Date(Date.now() + Number(f.days.value) * 86400000 - 60000);  // 7일 경계보다 1분 앞
-  const res = await api("/api/export-requests", {
-    method: "POST",
-    json: { file_id: f.file_id.value.trim(), member_id: f.member_id.value, recipient_id: opt.dataset.recipient,
-            consent_id: opt.value, purpose: f.purpose.value.trim(), expires_at: expires.toISOString() },
-  });
-  if (!res.ok) return showResult(out, await describe(res), false);
+  const res = await api(`/api/members/${m.member_id}/introductions`, { method: "POST", json: { consent_id: c.consent_id } });
+  if (!res.ok) { showResult(out, await describe(res), false); out.scrollIntoView({ block: "nearest" }); return; }
   const r = await res.json();
-  showResult(out, `발송 신청 완료 · ${r.request_id} (승인 대기)`, true);
+  showResult(out, `${m.pseudo_id} → ${c.counterpart_pseudo_id} 발송 요청 완료 (승인 대기) · 신청 ${short(r.request_id)} · "${r.profile.introduction}"`, true);
+  out.scrollIntoView({ block: "nearest" });
   loadRequests();
-}
-
-async function registerExport(ev) {
-  ev.preventDefault();
-  const out = $("export-transfer-result");
-  const id = ev.target.elements.export_id.value.trim();
-  const res = await api(`/api/member-exports/${encodeURIComponent(id)}/transfer-files`, { method: "POST" });
-  if (!res.ok) return showResult(out, await describe(res), false);
-  const f = await res.json();
-  showResult(out, `transfer_file_id ${f.transfer_file_id || f.file_id} · 검사 ${f.scan_status || "-"}` +
-    (f.export_banned ? " · 반출 금지" : ""), f.scan_status === "passed" && !f.export_banned);
 }
 
 // ---- ② 회원 관리 (정보 수정·탈퇴) ----
@@ -478,12 +403,7 @@ async function logout() {
 async function init() {
   $("logout-btn").onclick = logout;
   $("export-btn").onclick = async () => { $("export-btn").disabled = true; try { await runExport(); } finally { $("export-btn").disabled = false; } };
-  $("upload-form").onsubmit = uploadFile;
-  $("request-form").onsubmit = createRequest;
-  $("export-transfer-form").onsubmit = registerExport;
   $("revoke-form").onsubmit = (ev) => { ev.preventDefault(); revoke($("revoke-id").value.trim()); };
-  $("req-member").onchange = (ev) => fillConsents(ev.target.value);
-  $("req-consent").onchange = syncPurpose;
   $("edit-form").onsubmit = saveEdit;
   $("edit-cancel").onclick = () => { $("edit-card").hidden = true; };
   for (const chip of $("evidence-filters").querySelectorAll(".chip")) {

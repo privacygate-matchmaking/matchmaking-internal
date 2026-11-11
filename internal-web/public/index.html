@@ -57,7 +57,7 @@
 
       <!-- ① 담당 회원 조회 (상담: 담당 회원 / 총관리자: 전체) -->
       <section class="view" data-view="members" data-title="담당 회원 조회" hidden>
-        <div class="page-heading"><div><span class="eyebrow">ASSIGNED MEMBERS</span><h1>담당 회원 조회</h1><p class="muted" data-roles="counselor">나에게 배정된 회원만 보입니다. 서로 매칭된 회원에게 소개 자료를 보낼 수 있습니다.</p><p class="muted" data-roles="data_admin">총관리자는 전체 회원과 담당 배정을 봅니다.</p></div></div>
+        <div class="page-heading"><div><span class="eyebrow">ASSIGNED MEMBERS</span><h1>담당 회원 조회</h1><p class="muted" data-roles="counselor">나에게 배정된 회원만 보입니다. 서로 매칭된 회원 사이에서 소개 자료 발송을 요청할 수 있습니다.</p><p class="muted" data-roles="data_admin">총관리자는 전체 회원과 담당 배정을 봅니다.</p></div></div>
         <div class="content-layout"><div class="work">
           <div class="section-title"><h2>회원 목록</h2><span class="muted" id="members-count"></span></div>
           <div class="tablewrap">
@@ -89,30 +89,9 @@
           </div>
 
           <div data-roles="counselor">
-            <div class="section-title" id="request-section"><h2>매칭 소개 자료 발송</h2><span class="muted">① 소개 자료 등록(형식 검사) → ② 발송 신청 → 승인자가 승인하면 상대 회원이 받음</span></div>
-            <div class="two">
-              <div class="card">
-                <h3>① 소개 자료 파일 등록</h3>
-                <p class="muted">소개 JSON(member_pseudo_id, age_band, job_group, introduction)만 검사를 통과합니다.</p>
-                <form class="form one" id="upload-form">
-                  <label>파일<input type="file" name="file" accept="application/json,.json" required></label>
-                  <div><button type="submit" class="btn primary">등록</button></div>
-                </form>
-                <p id="upload-result" class="result" hidden></p>
-              </div>
-              <div class="card">
-                <h3>② 발송 신청</h3>
-                <form class="form one" id="request-form">
-                  <label>파일 ID (file_id)<input type="text" name="file_id" required pattern="[0-9a-fA-F-]{36}"></label>
-                  <label>자료 주인 (담당 회원)<select name="member_id" id="req-member" required></select></label>
-                  <label>받는 회원 (매칭 동의)<select name="consent_id" id="req-consent" required></select></label>
-                  <label>목적<input type="text" name="purpose" value="introduction" required maxlength="64"></label>
-                  <label>제공 기한<select name="days" id="req-days"><option value="1">1일</option><option value="3">3일</option><option value="7" selected>7일 (최대)</option></select></label>
-                  <div><button type="submit" class="btn primary">신청</button></div>
-                </form>
-                <p id="request-result" class="result" hidden></p>
-              </div>
-            </div>
+            <div class="section-title" id="request-section"><h2>소개 자료 발송</h2><span class="muted">매칭 성사 → 담당 상담이 "발송 요청" → 승인자가 승인하면 상대 회원이 받음</span></div>
+            <div class="notice">소개 자료는 직원이 올리지 않습니다. 회원 상세의 매칭 동의에서 <strong>발송 요청</strong>을 누르면 서버가 회원 정보(가명 ID·연령대·직업·증빙 확인 여부)로 자료를 만들어 신청합니다. 이름·연락처·증빙 원본은 들어가지 않습니다.</div>
+            <p id="request-result" class="result" hidden></p>
             <div class="section-title"><h2>내 발송 신청 내역</h2></div>
             <div class="tablewrap">
               <table>
@@ -121,15 +100,6 @@
               </table>
               <div class="empty" id="requests-empty" hidden>신청 내역이 없습니다.</div>
             </div>
-            <details class="card mt16 sub">
-              <summary>내보내기 결과 중계 등록</summary>
-              <p class="muted">본인이 만든 내보내기(export_id)만 등록할 수 있습니다. 전체 회원 파일은 검사에서 차단(blocked)됩니다.</p>
-              <form class="form inline" id="export-transfer-form">
-                <label>export_id<input type="text" name="export_id" required pattern="[0-9a-fA-F-]{36}"></label>
-                <div><button type="submit" class="btn">등록</button></div>
-              </form>
-              <p id="export-transfer-result" class="result" hidden></p>
-            </details>
           </div>
         </div><aside class="guide"><span class="eyebrow">STAFF GUIDE</span><h2>회원 조회</h2><ol><li><p>담당 관계가 있는 회원만 보입니다(총관리자는 전체). 이름·연락처는 화면에 나오지 않습니다.</p></li><li><p>소개 자료는 서로 매칭해 동의가 있는 상대에게만 보낼 수 있습니다.</p></li><li><p>발송은 다른 승인자가 승인해야 상대에게 전달됩니다.</p></li><li><p>모든 조회·변경은 추적번호와 함께 감사 로그에 기록됩니다.</p></li></ol></aside></div>
       </section>

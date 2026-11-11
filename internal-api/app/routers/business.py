@@ -8,6 +8,7 @@
 """
 import csv
 import io
+import json
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
@@ -173,6 +174,69 @@ def withdraw_member(member_id: uuid.UUID, request: Request,
                      (member_id, member_id))
     audit.allow(request, target_type="member", target_id=m["pseudo_id"])
     return {"member_id": str(member_id), "status": "withdrawn", "revoked_consents": revoked}
+
+
+# ======================================================================
+# 매칭 소개 자료 발송 요청 (counselor). 자료는 직원이 올리지 않고 서버가 회원 DB 로 만든다
+# ======================================================================
+def _age_band(birth_year) -> str:
+    if not birth_year:
+        return "비공개"
+    age = _now().year - int(birth_year)
+    return f"{(age // 10) * 10}대"
+
+
+class IntroductionIn(BaseModel):
+    consent_id: uuid.UUID
+
+
+@router.post("/members/{member_id}/introductions", status_code=201)
+def request_introduction(member_id: uuid.UUID, body: IntroductionIn, request: Request,
+                         principal: Principal = Depends(require(Role.COUNSELOR)),
+                         _csrf: None = Depends(require_csrf)):
+    """매칭으로 생긴 유효 동의(이 회원 → 상대)로 소개 자료 발송을 요청한다. ※ 명세 외 추가
+    1) 담당 회원·유효 동의·상대 외부 계정 확인
+    2) 소개 자료(JSON: 가명 ID·연령대·직업·소개 문구)를 회원 DB 에서 만든다 — 이름·연락처·증빙 원본은 넣지 않음
+       (증빙은 '심사 통과 여부'만 소개 문구에 표시)
+    3) 중계에 파일 등록(형식 검사) → 발송 신청(승인 대기). 승인은 다른 승인자가 한다."""
+    with db.connection() as conn:
+        m = _member_in_scope(conn, principal, member_id)
+        if m["status"] != "active":
+            raise GateError(ErrorCode.INVALID_STATE, "member_withdrawn")
+        c = conn.execute(
+            """SELECT c.consent_id, c.purpose, c.expires_at, rm.user_id AS recipient_id
+                 FROM consents c JOIN members rm ON rm.member_id = c.counterpart_member_id
+                WHERE c.consent_id = %s AND c.member_id = %s AND c.item = 'profile'
+                  AND c.revoked_at IS NULL AND c.expires_at > now() AND rm.status = 'active'""",
+            (body.consent_id, member_id)).fetchone()
+        if c is None:
+            raise GateError(ErrorCode.INVALID_STATE, "consent_not_valid")
+        if c["recipient_id"] is None:
+            raise GateError(ErrorCode.INVALID_STATE, "recipient_has_no_account")
+        verified = conn.execute(
+            """SELECT 1 FROM evidence_reviews r JOIN evidence_files e ON e.file_id = r.file_id
+                WHERE e.member_id = %s AND r.result = 'passed' LIMIT 1""", (member_id,)).fetchone() is not None
+    job = m["job"] or "비공개"
+    profile = {"member_pseudo_id": m["pseudo_id"], "age_band": _age_band(m["birth_year"]), "job_group": job,
+               "introduction": f"{_age_band(m['birth_year'])} {job} 회원입니다. "
+                               f"증빙 서류 {'확인 완료' if verified else '확인 전'}."}
+    data = json.dumps(profile, ensure_ascii=False).encode("utf-8")
+    up = transfer_client.call(request, "POST", "/api/transfer-files",
+                              files={"file": ("introduction.json", data, "application/json")})
+    if up.status_code != 201:
+        audit.deny(request, f"transfer_status_{up.status_code}")
+        return transfer_client.relay(up)
+    file_id = up.json()["file_id"]
+    # 제공 기한: 최대 7일, 동의 만료를 넘지 않게 (경계보다 1분 앞)
+    expires = min(_now() + timedelta(days=7), c["expires_at"]) - timedelta(minutes=1)
+    req = transfer_client.call(request, "POST", "/api/export-requests", json={
+        "file_id": file_id, "member_id": str(member_id), "recipient_id": str(c["recipient_id"]),
+        "consent_id": str(c["consent_id"]), "purpose": c["purpose"], "expires_at": expires.isoformat()})
+    if req.status_code != 201:
+        audit.deny(request, f"transfer_status_{req.status_code}")
+        return transfer_client.relay(req)
+    audit.allow(request, target_type="export_request", target_id=req.json().get("request_id"))
+    return {**req.json(), "file_id": file_id, "profile": profile}
 
 
 # ======================================================================
