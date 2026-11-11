@@ -164,7 +164,7 @@ async function loadMembers() {
   state.members = items;
   $("members-count").textContent = `${items.length}명`;
   fill("members-body", "members-empty", items.map((m) =>
-    row([memberCell(m), ageText(m), m.height_cm ? `${m.height_cm}cm` : "-",
+    row([memberCell(m), m.name ?? "-", m.gender ?? "-", ageText(m), m.height_cm ? `${m.height_cm}cm` : "-",
          withMark(m.education_level, m.education_verified), m.job_group ?? "-", m.counselors || "미배정",
          memberStatus(m), actions(button("상세", () => showMember(m.member_id)))])));
 }
@@ -179,6 +179,8 @@ async function showMember(memberId) {
   $("member-detail-status").replaceChildren(pill(m.status));
   const f = $("member-facts");
   f.replaceChildren();
+  fact(f, "이름", m.name ?? "-");
+  fact(f, "성별", m.gender ?? "-");
   fact(f, "나이", m.birth_date ? `${ageText(m)} (${m.birth_date})` : "-");
   fact(f, "키 · 몸무게", m.height_cm ? `${m.height_cm}cm · ${m.weight_kg ?? "-"}kg (본인 신고)` : "-");
   fact(f, "학력", `${m.education_level ?? "-"}${m.school ? ` · ${m.school}` : ""}${m.major ? ` ${m.major}` : ""}  [학력 증빙 ${m.education_verified ? "통과" : "미확인 — 매칭 불가"}]`);
@@ -234,7 +236,7 @@ async function loadManage() {
     const ev = el("div");
     ev.append(el("span", "학력", m.education_verified ? "pill green" : "pill off"), document.createTextNode(" "),
               el("span", "재직", m.employment_verified ? "pill green" : "pill off"));
-    return row([memberCell(m), ageText(m), m.education_level ?? "-",
+    return row([memberCell(m), m.name ?? "-", m.gender ?? "-", ageText(m), m.education_level ?? "-",
                 `${m.job_group ?? "-"}${m.company ? ` · ${m.company}` : ""}`, ev, m.counselors || "미배정", memberStatus(m),
                 active ? actions(button("수정", () => openEdit(m)),
                                  button("탈퇴", () => withdraw(m), "btn sm danger")) : "-"]);
@@ -245,9 +247,9 @@ async function loadManage() {
 function openEdit(m) {
   const f = $("edit-form").elements;
   f.member_id.value = m.member_id;
-  for (const k of ["birth_date", "height_cm", "weight_kg", "education_level", "school", "major",
+  for (const k of ["name", "gender", "birth_date", "height_cm", "weight_kg", "education_level", "school", "major",
                    "job_group", "company", "introduction"]) f[k].value = m[k] ?? "";
-  $("edit-title").textContent = `회원 정보 수정 · ${m.pseudo_id}`;
+  $("edit-title").textContent = `회원 정보 수정 · ${m.pseudo_id} ${m.name ?? ""}`;
   $("edit-card").hidden = false;
   $("edit-card").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
@@ -256,7 +258,7 @@ async function saveEdit(ev) {
   ev.preventDefault();
   const f = ev.target.elements;
   const body = {};
-  for (const k of ["birth_date", "education_level", "school", "major", "job_group", "company", "introduction"]) {
+  for (const k of ["name", "gender", "birth_date", "education_level", "school", "major", "job_group", "company", "introduction"]) {
     const v = f[k].value.trim();
     body[k] = v === "" ? null : v;
   }
@@ -275,7 +277,7 @@ async function withdraw(m) {
   // confirm() 대화상자 대신 같은 버튼을 한 번 더 누르게 한다 (실수 방지)
   if (state.pendingWithdraw !== m.member_id) {
     state.pendingWithdraw = m.member_id;
-    showResult($("manage-result"), `${m.pseudo_id} 탈퇴: 실명·연락처·학교·직장·소개 삭제, 동의·매칭 철회. 되돌릴 수 없습니다. 진행하려면 '탈퇴'를 한 번 더 누르세요.`, false);
+    showResult($("manage-result"), `${m.pseudo_id} ${m.name ?? ""} 탈퇴: 실명·연락처·학교·직장·소개 삭제, 동의·매칭 철회. 되돌릴 수 없습니다. 진행하려면 '탈퇴'를 한 번 더 누르세요.`, false);
     return;
   }
   state.pendingWithdraw = null;
@@ -317,7 +319,7 @@ function renderReviews() {
       ? el("span", e.review_result === "passed" ? "통과" : "반려", `pill ${e.review_result === "passed" ? "green" : "red"}`)
       : pill(e.status);
     return row([mono(short(e.file_id)), memberCell({ pseudo_id: e.member_pseudo_id }),
-      e.kind === "employment" ? "재직" : "학력", toKst(e.created_at), status, e.reviewer || "-",
+      e.member_name ?? "-", e.kind === "employment" ? "재직" : "학력", toKst(e.created_at), status, e.reviewer || "-",
       toKst(e.delete_after) + (e.legal_hold ? " (보존)" : ""),
       open ? actions(button("열람", () => openEvidence(e.file_id)),
                      button("통과", () => review(e.file_id, "passed")),

@@ -65,8 +65,8 @@ EDUCATION_LEVELS = ("고졸", "전문대졸", "4년제 대졸", "대학원졸")
 SCOPE_SQL = """(%(role)s = 'data_admin' OR EXISTS (SELECT 1 FROM assignments a
                  WHERE a.member_id = m.member_id AND a.user_id = %(uid)s))"""
 
-# 직원 화면에 보이는 프로필 항목 (실명·연락처는 넣지 않는다)
-PROFILE_COLS = """m.member_id, m.pseudo_id, m.birth_date, m.height_cm, m.weight_kg,
+# 직원 화면에 보이는 프로필 항목 (연락처는 넣지 않는다)
+PROFILE_COLS = """m.member_id, m.pseudo_id, m.name, m.gender, m.birth_date, m.height_cm, m.weight_kg,
                   m.education_level, m.school, m.major, m.job_group, m.company, m.introduction,
                   m.education_verified, m.employment_verified, m.status, m.withdrawn_at, m.created_at,
                   (m.user_id IS NOT NULL) AS has_account"""
@@ -85,7 +85,7 @@ def _age(birth_date) -> int | None:
 
 
 def _profile(r) -> dict:
-    return {"member_id": str(r["member_id"]), "pseudo_id": r["pseudo_id"],
+    return {"member_id": str(r["member_id"]), "pseudo_id": r["pseudo_id"], "name": r["name"], "gender": r["gender"],
             "birth_date": r["birth_date"].isoformat() if r["birth_date"] else None, "age": _age(r["birth_date"]),
             "height_cm": r["height_cm"], "weight_kg": r["weight_kg"],
             "education_level": r["education_level"], "school": r["school"], "major": r["major"],
@@ -105,8 +105,8 @@ def _member_in_scope(conn, principal: Principal, member_id) -> dict:
 
 @router.get("/members")
 def list_members(request: Request, principal: Principal = Depends(require(*MEMBER_ROLES))):
-    """회원 목록: 프로필(회원 코드·만 나이·키·몸무게·학력·직군·직장·소개·증빙 상태)과 담당 직원·상태.
-    실명·연락처는 주지 않는다."""
+    """회원 목록: 프로필(회원 코드·이름·성별·만 나이·키·몸무게·학력·직군·직장·소개·증빙 상태)과 담당 직원·상태.
+    연락처는 주지 않는다."""
     with db.connection() as conn:
         rows = conn.execute(
             f"""SELECT {PROFILE_COLS},
@@ -151,6 +151,8 @@ def get_member(member_id: uuid.UUID, request: Request,
 
 
 class MemberUpdateIn(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=40)
+    gender: str | None = Field(default=None, pattern="^(남|여)$")
     birth_date: date | None = None
     height_cm: int | None = Field(default=None, ge=120, le=230)
     weight_kg: int | None = Field(default=None, ge=30, le=200)
@@ -171,9 +173,11 @@ JOB_FIELDS = {"company"}
 def update_member(member_id: uuid.UUID, body: MemberUpdateIn, request: Request,
                   principal: Principal = Depends(require(*MEMBER_ROLES)),
                   _csrf: None = Depends(require_csrf)):
-    """회원 정보 수정 (실명·연락처 제외). 담당 회원(총관리자는 전체), 탈퇴 회원은 불가.
+    """회원 정보 수정 (연락처 제외). 담당 회원(총관리자는 전체), 탈퇴 회원은 불가.
     학력 항목이 바뀌면 학력 증빙, 직장이 바뀌면 재직 증빙 확인이 풀린다 (다시 심사). ※ 명세 외 추가"""
     fields = body.model_dump(exclude_unset=True)
+    if "name" in fields and not fields["name"]:
+        fields.pop("name")                                       # 이름은 비울 수 없다
     if not fields:
         raise GateError(ErrorCode.INVALID_REQUEST, "nothing_to_update")
     if fields.get("birth_date") and not (date(1900, 1, 1) <= fields["birth_date"] <= _now().date()):
@@ -301,7 +305,7 @@ def request_introduction(member_id: uuid.UUID, body: IntroductionIn, request: Re
 # ======================================================================
 # 관리자 전체 회원 내보내기 (공격 ① 대상)
 # ======================================================================
-EXPORT_COLUMNS = ("pseudo_id", "name", "birth_date", "height_cm", "weight_kg", "education_level",
+EXPORT_COLUMNS = ("pseudo_id", "name", "gender", "birth_date", "height_cm", "weight_kg", "education_level",
                   "school", "major", "job_group", "company", "contact_phone", "contact_email")
 
 
@@ -410,7 +414,7 @@ def list_evidence(request: Request, principal: Principal = Depends(require(*MEMB
     """심사할 증빙 목록: counselor 는 담당 회원의 증빙만, 총관리자는 전체. 원본 내용은 넣지 않는다. ※ 명세 외 추가"""
     with db.connection() as conn:
         rows = conn.execute(
-            f"""SELECT e.file_id, m.pseudo_id, m.member_id, e.kind, e.status, e.created_at,
+            f"""SELECT e.file_id, m.pseudo_id, m.name, m.member_id, e.kind, e.status, e.created_at,
                        e.delete_after, e.legal_hold,
                        r.result, u.pseudo_id AS reviewer
                   FROM evidence_files e JOIN members m ON m.member_id = e.member_id
@@ -420,7 +424,7 @@ def list_evidence(request: Request, principal: Principal = Depends(require(*MEMB
             _scope(principal)).fetchall()
     audit.allow(request, target_type="evidence_list")
     return {"items": [{"file_id": str(r["file_id"]), "member_id": str(r["member_id"]),
-                       "member_pseudo_id": r["pseudo_id"], "kind": r["kind"],
+                       "member_pseudo_id": r["pseudo_id"], "member_name": r["name"], "kind": r["kind"],
                        "status": r["status"], "review_result": r["result"],
                        "reviewer": r["reviewer"], "created_at": _iso(r["created_at"]),
                        "delete_after": _iso(r["delete_after"]), "legal_hold": r["legal_hold"]} for r in rows]}

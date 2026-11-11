@@ -62,7 +62,7 @@
           <div class="section-title"><h2>회원 목록</h2><span class="muted" id="members-count"></span></div>
           <div class="tablewrap">
             <table>
-              <thead><tr><th>회원</th><th>나이</th><th>키</th><th>학력</th><th>직군</th><th>담당 직원</th><th>상태</th><th>관리</th></tr></thead>
+              <thead><tr><th>회원</th><th>이름</th><th>성별</th><th>나이</th><th>키</th><th>학력</th><th>직군</th><th>담당 직원</th><th>상태</th><th>관리</th></tr></thead>
               <tbody id="members-body"></tbody>
             </table>
             <div class="empty" id="members-empty" hidden>회원이 없습니다.</div>
@@ -102,7 +102,7 @@
               <div class="empty" id="requests-empty" hidden>신청 내역이 없습니다.</div>
             </div>
           </div>
-        </div><aside class="guide"><span class="eyebrow">STAFF GUIDE</span><h2>회원 조회</h2><ol><li><p>담당 관계가 있는 회원만 보입니다(총관리자는 전체). 이름·연락처는 화면에 나오지 않습니다.</p></li><li><p>소개 자료는 서로 매칭해 동의가 있는 상대에게만 보낼 수 있습니다.</p></li><li><p>발송은 다른 승인자가 승인해야 상대에게 전달됩니다.</p></li><li><p>모든 조회·변경은 추적번호와 함께 감사 로그에 기록됩니다.</p></li></ol></aside></div>
+        </div><aside class="guide"><span class="eyebrow">STAFF GUIDE</span><h2>회원 조회</h2><ol><li><p>담당 관계가 있는 회원만 보입니다(총관리자는 전체). 연락처는 화면에 나오지 않습니다.</p></li><li><p>소개 자료는 서로 매칭해 동의가 있는 상대에게만 보낼 수 있습니다.</p></li><li><p>발송은 다른 승인자가 승인해야 상대에게 전달됩니다.</p></li><li><p>모든 조회·변경은 추적번호와 함께 감사 로그에 기록됩니다.</p></li></ol></aside></div>
       </section>
 
       <!-- ② 회원 관리: 정보 수정·탈퇴 (상담: 담당 회원 / 총관리자: 전체 + 내보내기) -->
@@ -118,16 +118,18 @@
           <div class="section-title"><h2>회원 정보</h2><span class="muted">새 회원은 상담 직원에게 무작위로 배정됩니다</span></div>
           <div class="tablewrap">
             <table>
-              <thead><tr><th>회원</th><th>나이</th><th>학력</th><th>직군 · 직장</th><th>증빙</th><th>담당 직원</th><th>상태</th><th>관리</th></tr></thead>
+              <thead><tr><th>회원</th><th>이름</th><th>성별</th><th>나이</th><th>학력</th><th>직군 · 직장</th><th>증빙</th><th>담당 직원</th><th>상태</th><th>관리</th></tr></thead>
               <tbody id="manage-body"></tbody>
             </table>
             <div class="empty" id="manage-empty" hidden>회원이 없습니다.</div>
           </div>
           <div class="card mt16" id="edit-card" hidden>
             <h3 id="edit-title">회원 정보 수정</h3>
-            <p class="muted">학력(구분·학교·전공)을 바꾸면 학력 증빙, 직장을 바꾸면 재직 증빙을 다시 심사해야 합니다. 실명·연락처는 여기서 다루지 않습니다.</p>
+            <p class="muted">학력(구분·학교·전공)을 바꾸면 학력 증빙, 직장을 바꾸면 재직 증빙을 다시 심사해야 합니다. 연락처는 여기서 다루지 않습니다.</p>
             <form class="form grid3" id="edit-form">
               <input type="hidden" name="member_id">
+              <label>이름<input type="text" name="name" maxlength="40" required></label>
+              <label>성별<select name="gender"><option value="">선택</option><option>남</option><option>여</option></select></label>
               <label>생년월일<input type="date" name="birth_date"></label>
               <label>키(cm, 본인 신고)<input type="number" name="height_cm" min="120" max="230"></label>
               <label>몸무게(kg, 본인 신고)<input type="number" name="weight_kg" min="30" max="200"></label>
@@ -159,7 +161,7 @@
               <div class="empty" id="exports-empty" hidden>내보내기 내역이 없습니다.</div>
             </div>
           </div>
-        </div><aside class="guide"><span class="eyebrow">STAFF GUIDE</span><h2>회원 관리</h2><ol><li><p>실명·연락처는 화면에 나오지 않습니다. 학력·직장을 바꾸면 해당 증빙을 다시 심사해야 합니다.</p></li><li><p>탈퇴하면 실명·연락처·학교·직장·소개가 지워지고, 이 회원이 주고받은 동의와 매칭이 모두 철회됩니다. 되돌릴 수 없습니다.</p></li><li><p>상담 직원의 내보내기 내역이 보이면 즉시 확인하세요(총관리자).</p></li><li><p>모든 조회·변경은 추적번호와 함께 감사 로그에 기록됩니다.</p></li></ol></aside></div>
+        </div><aside class="guide"><span class="eyebrow">STAFF GUIDE</span><h2>회원 관리</h2><ol><li><p>연락처는 화면에 나오지 않습니다. 학력·직장을 바꾸면 해당 증빙을 다시 심사해야 합니다.</p></li><li><p>탈퇴하면 실명·연락처·학교·직장·소개가 지워지고, 이 회원이 주고받은 동의와 매칭이 모두 철회됩니다. 되돌릴 수 없습니다.</p></li><li><p>상담 직원의 내보내기 내역이 보이면 즉시 확인하세요(총관리자).</p></li><li><p>모든 조회·변경은 추적번호와 함께 감사 로그에 기록됩니다.</p></li></ol></aside></div>
       </section>
 
       <!-- ③ 회원·서류 조회·심사·승인 (상담: 담당 회원 / 총관리자: 전체) -->
@@ -175,7 +177,7 @@
           </div>
           <div class="tablewrap">
             <table>
-              <thead><tr><th>서류 ID</th><th>회원</th><th>종류</th><th>접수</th><th>상태</th><th>심사자</th><th>삭제 기한</th><th>관리</th></tr></thead>
+              <thead><tr><th>서류 ID</th><th>회원</th><th>이름</th><th>종류</th><th>접수</th><th>상태</th><th>심사자</th><th>삭제 기한</th><th>관리</th></tr></thead>
               <tbody id="reviews-body"></tbody>
             </table>
             <div class="empty" id="reviews-empty" hidden>서류가 없습니다.</div>
