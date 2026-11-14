@@ -71,7 +71,7 @@ def list_export_requests(request: Request,
     if resp.status_code != 200:
         return transfer_client.relay(resp)
     body = resp.json()
-    _with_pseudo_ids(body.get("items", []))
+    _with_pseudo_ids(body.get("items", []),principal)
     _with_labels(body.get("items", []))
     return body
 
@@ -83,7 +83,7 @@ def get_export_request(request_id: uuid.UUID, request: Request,
     if resp.status_code != 200:
         return transfer_client.relay(resp)
     body = resp.json()
-    _with_pseudo_ids([body])
+    _with_pseudo_ids([body],principal)
     _with_labels([body])
     return body
 
@@ -110,7 +110,7 @@ def _with_labels(items: list[dict]) -> None:
             it["consent_label"] = f"C-{cons[str(it['consent_id'])]}"
 
 
-def _with_pseudo_ids(items: list[dict]) -> None:
+def _with_pseudo_ids(items: list[dict], principal: Principal) -> None:
     """중계 응답의 user_id·member_id(UUID) 옆에 화면용 가명 ID 를 붙인다 (예: A-C01, A-001).
     판단에는 쓰지 않는 표시 정보이며, 없는 값은 붙이지 않는다."""
     ids = {str(v) for it in items for k in ("requester_id", "recipient_id", "member_id") if (v := it.get(k))}
@@ -119,12 +119,25 @@ def _with_pseudo_ids(items: list[dict]) -> None:
     with db.connection() as conn:
         # 직원은 표시 이름 없이 코드만, 회원(회원 행 또는 회원 로그인 계정)은 코드 + 이름
         rows = conn.execute(
-            """SELECT u.user_id::text AS id, u.pseudo_id, m.name
+            """SELECT u.user_id::text AS id,
+                 CASE WHEN m.member_id IS NULL OR %(full)s OR EXISTS
+                    (SELECT 1 FROM assignments a WHERE a.member_id=m.member_id AND a.user_id=%(staff)s)
+                    THEN u.pseudo_id ELSE '소개 상대' END AS pseudo_id,
+                 CASE WHEN %(full)s OR EXISTS
+                    (SELECT 1 FROM assignments a WHERE a.member_id=m.member_id AND a.user_id=%(staff)s)
+                    THEN m.name ELSE NULL END AS name
                  FROM users u LEFT JOIN members m ON m.user_id = u.user_id
                 WHERE u.user_id::text = ANY(%(ids)s)
                UNION ALL
-               SELECT member_id::text, pseudo_id, name FROM members WHERE member_id::text = ANY(%(ids)s)""",
-            {"ids": list(ids)}).fetchall()
+               SELECT m.member_id::text,
+                 CASE WHEN %(full)s OR EXISTS
+                    (SELECT 1 FROM assignments a WHERE a.member_id=m.member_id AND a.user_id=%(staff)s)
+                    THEN m.pseudo_id ELSE '소개 상대' END,
+                 CASE WHEN %(full)s OR EXISTS
+                    (SELECT 1 FROM assignments a WHERE a.member_id=m.member_id AND a.user_id=%(staff)s)
+                    THEN m.name ELSE NULL END
+               FROM members m WHERE m.member_id::text = ANY(%(ids)s)""",
+            {"ids": list(ids),'full':principal.role!=Role.COUNSELOR.value,'staff':principal.user_id}).fetchall()
     found = {r["id"]: r for r in rows}
     for it in items:
         for k in ("requester_id", "recipient_id", "member_id"):

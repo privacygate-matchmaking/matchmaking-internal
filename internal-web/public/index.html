@@ -41,7 +41,7 @@
   </header>
 
   <main>
-    <!-- 로그인 전 -->
+
     <section id="login-view" class="login-layout" hidden>
       <div class="welcome">
         <span class="eyebrow">AUTHORIZED STAFF ONLY</span>
@@ -59,7 +59,7 @@
       </div>
     </section>
 
-    <!-- 로그인 후 -->
+
     <div id="app-view" hidden>
       <div id="baseline-banner" class="notice danger" hidden>
         비교 시연 모드(GATE_MODE=baseline)입니다. 공격 ①② 대상 통제가 꺼져 있습니다. 시연 후 enforce 로 되돌리세요.
@@ -69,17 +69,22 @@
         <div><span class="small-label">업무 역할</span><strong id="side-role"></strong></div>
         <p><span id="crumb" class="crumb">이음 내부 업무</span><br><span class="muted">메뉴는 역할에 맞게 보이며, 권한은 서버가 요청마다 다시 확인합니다.</span></p>
       </div>
-      <!-- 메뉴 표시는 편의 기능일 뿐, 권한은 서버가 매 요청 확인한다 -->
+
       <nav class="tabs" id="nav" aria-label="업무 메뉴">
         <button type="button" class="tab" data-view="members"   data-roles="counselor,data_admin">담당 회원 조회</button>
         <button type="button" class="tab" data-view="manage"    data-roles="counselor,data_admin">회원 관리</button>
         <button type="button" class="tab" data-view="evidence"  data-roles="counselor,data_admin">회원·서류 조회·심사·승인</button>
         <button type="button" class="tab" data-view="approvals" data-roles="approver">소개 자료 발송 승인</button>
+        <button type="button" class="tab" data-view="meetings" data-roles="counselor">매칭·동의·일정</button>
       </nav>
 
-      <!-- ① 담당 회원 조회 (상담: 담당 회원 / 총관리자: 전체) -->
+      <section class="view" data-view="meetings" data-title="만남 일정 관리" hidden>
+        <div class="page-heading"><div><span class="eyebrow">MEETING SCHEDULE</span><h1>만남 일정 관리</h1><p class="muted">담당 회원의 성사 매칭에 최대 3개 후보를 제안하고, 양쪽 동의 후 확정합니다. 연락처는 자동 전달하지 않습니다.</p></div></div>
+        <p id="meeting-message" role="status"></p><div id="matching-overview-panel"></div><div id="meeting-panel" class="card"></div>
+      </section>
+
       <section class="view" data-view="members" data-title="담당 회원 조회" hidden>
-        <div class="page-heading"><div><span class="eyebrow">ASSIGNED MEMBERS</span><h1>담당 회원 조회</h1><p class="muted" data-roles="counselor">나에게 배정된 회원만 보입니다. 서로 매칭된 회원 사이에서 소개 자료 발송을 요청할 수 있습니다.</p><p class="muted" data-roles="data_admin">총관리자는 전체 회원과 담당 배정을 봅니다.</p></div></div>
+        <div class="page-heading"><div><span class="eyebrow">ASSIGNED MEMBERS</span><h1>담당 회원 조회</h1><p class="muted" data-roles="counselor">나에게 배정된 회원만 보입니다. 유효한 제공 동의가 있는 회원 사이에서 소개 자료 발송을 요청할 수 있습니다.</p><p class="muted" data-roles="data_admin">총관리자는 전체 회원과 담당 배정을 봅니다.</p></div></div>
         <div class="content-layout"><div class="work">
           <div class="section-title"><h2>회원 목록</h2><span class="muted" id="members-count"></span></div>
           <div class="searchbar"><input type="search" id="members-search" placeholder="회원 코드·이름·학력·직군·담당 직원으로 검색" aria-label="회원 검색"></div>
@@ -93,15 +98,8 @@
           <div class="card mt16" id="member-detail" hidden>
             <div class="row-between"><h2 id="member-detail-title"></h2><span id="member-detail-status"></span></div>
             <dl class="facts" id="member-facts"></dl>
-            <h3 class="sub-h">매칭 현황</h3>
-            <p class="muted">회원이 외부 화면에서 서로 매칭을 누르면 양쪽 프로필 제공 동의(30일)가 자동으로 만들어집니다.</p>
-            <div class="tablewrap">
-              <table>
-                <thead><tr><th>소개된 상대</th><th>이 회원</th><th>상대</th><th>상태</th></tr></thead>
-                <tbody id="matches-body"></tbody>
-              </table>
-              <div class="empty" id="matches-empty" hidden>소개된 상대가 없습니다.</div>
-            </div>
+            <h3 class="sub-h">유료 매칭·일정</h3><div id="member-matching-panel"></div>
+            <p class="muted">회원의 유료 신청과 상대 수락으로 성사됩니다. 공개 동의는 별도이며 자동 생성하지 않습니다. 담당 상담 직원은 매칭·동의·일정 탭에서 일정을 제안·확정합니다.</p>
             <h3 class="sub-h">제공 동의</h3>
             <div class="tablewrap">
               <table>
@@ -114,7 +112,7 @@
 
           <div data-roles="counselor">
             <div class="section-title" id="request-section"><h2>소개 자료 발송</h2><span class="muted">매칭 성사 → 담당 상담이 "발송 요청" → 승인자가 승인하면 상대 회원이 받음</span></div>
-            <div class="notice">소개 자료는 직원이 올리지 않습니다. 회원 상세의 매칭 동의에서 <strong>발송 요청</strong>을 누르면 서버가 회원 정보(이름·만 나이·키·몸무게·학력·직군·소개, 재직 증빙이 통과된 경우 직장)로 자료를 만들어 신청합니다. 회원 코드·연락처·증빙 원본은 들어가지 않습니다.</div>
+            <div class="notice">소개 자료는 직원이 올리지 않습니다. 회원 상세의 공개 동의 현황에서 <strong>발송 요청</strong>을 누르면 새 매칭 자료는 회원이 동의한 항목 중 직원이 선택한 심사 완료 결과만으로 생성합니다. 기존 제공 동의는 기존 반출 건의 관리용으로 유지합니다. 회원 코드·연락처·증빙 원본은 들어가지 않습니다.</div>
             <p id="request-result" class="result" hidden></p>
             <div class="section-title"><h2>내 발송 신청 내역</h2></div>
             <div class="tablewrap">
@@ -128,7 +126,7 @@
         </div><aside class="guide"><span class="eyebrow">STAFF GUIDE</span><h2>회원 조회</h2><ol><li><p>담당 관계가 있는 회원만 보입니다(총관리자는 전체). 연락처는 화면에 나오지 않습니다.</p></li><li><p>소개 자료는 서로 매칭해 동의가 있는 상대에게만 보낼 수 있습니다.</p></li><li><p>발송은 다른 승인자가 승인해야 상대에게 전달됩니다.</p></li><li><p>모든 조회·변경은 추적번호와 함께 감사 로그에 기록됩니다.</p></li></ol></aside></div>
       </section>
 
-      <!-- ② 회원 관리: 정보 수정·탈퇴 (상담: 담당 회원 / 총관리자: 전체 + 내보내기) -->
+
       <section class="view" data-view="manage" data-title="회원 관리" hidden>
         <div class="page-heading"><div><span class="eyebrow">MEMBER ADMINISTRATION</span><h1>회원 관리</h1><p class="muted">회원 프로필(생년월일·키·몸무게·학력·직군·직장·소개)을 수정하고 탈퇴를 처리합니다. 상담 직원은 담당 회원만, 총관리자는 전체 회원을 관리합니다.</p></div></div>
         <div class="stats">
@@ -188,7 +186,7 @@
         </div><aside class="guide"><span class="eyebrow">STAFF GUIDE</span><h2>회원 관리</h2><ol><li><p>연락처는 화면에 나오지 않습니다. 학력·직장을 바꾸면 해당 증빙을 다시 심사해야 합니다.</p></li><li><p>탈퇴는 7일 유예 후 회원 정보가 DB에서 삭제됩니다(그 전에는 철회 가능). 즉시 탈퇴는 바로 삭제되며 되돌릴 수 없습니다.</p></li><li><p>상담 직원의 내보내기 내역이 보이면 즉시 확인하세요(총관리자).</p></li><li><p>모든 조회·변경은 추적번호와 함께 감사 로그에 기록됩니다.</p></li></ol></aside></div>
       </section>
 
-      <!-- ③ 회원·서류 조회·심사·승인 (상담: 담당 회원 / 총관리자: 전체) -->
+
       <section class="view" data-view="evidence" data-title="회원·서류 심사" hidden>
         <div class="page-heading"><div><span class="eyebrow">DOCUMENT REVIEW</span><h1>회원 · 서류 조회 · 심사 · 승인</h1><p class="muted">회원이 제출한 학력(졸업증명서)·재직(재직증명서) 서류를 열람하고 통과(승인) 또는 반려합니다. 학력이 통과되어야 회원이 매칭할 수 있고, 재직이 통과되면 소개 자료에 직장이 함께 나갑니다.</p></div></div>
         <div class="content-layout"><div class="work">
@@ -210,7 +208,7 @@
         </div><aside class="guide"><span class="eyebrow">STAFF GUIDE</span><h2>서류 심사</h2><ol><li><p>심사 중인 서류만 열람할 수 있고, 처음 연 직원이 심사자로 기록됩니다.</p></li><li><p>열람한 서류를 저장하거나 외부로 옮기지 마세요.</p></li><li><p>원본은 심사 후 7일, 미심사 30일이 지나면 자동 삭제됩니다.</p></li><li><p>모든 조회·변경은 추적번호와 함께 감사 로그에 기록됩니다.</p></li></ol></aside></div>
       </section>
 
-      <!-- ④ 소개 자료 발송 승인 (approver) -->
+
       <section class="view" data-view="approvals" data-title="소개 자료 발송 승인" hidden>
         <div class="page-heading"><div><span class="eyebrow">DELIVERY APPROVAL</span><h1>소개 자료 발송 승인</h1><p class="muted">매칭된 회원에게 보내는 소개 자료 발송 신청을 확인하고 승인 또는 거절합니다. 본인이 신청한 건은 처리할 수 없습니다.</p></div></div>
         <div class="content-layout"><div class="work">
@@ -253,7 +251,7 @@
     </div>
   </main>
   <footer><span class="footer-brand">이음 결혼정보회사 · 내부 업무</span><span>PrivacyGate 개인정보 접근·반출 통제</span><span>가상 기업 · 교육용 시제품</span></footer>
-  <!-- 확인 팝업 (탈퇴 등 되돌리기 어려운 작업) -->
+
   <dialog id="confirm-dialog" class="confirm">
     <form method="dialog">
       <span class="eyebrow" id="confirm-eyebrow">CONFIRM</span>
@@ -264,6 +262,8 @@
       <div class="actions" id="confirm-actions"></div>
     </form>
   </dialog>
+  <script src="/meeting-staff.js"></script>
+  <script src="/matching-staff.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

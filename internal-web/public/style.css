@@ -1,5 +1,5 @@
 @charset "UTF-8";
-/* 이음 내부 업무 콘솔 — 외부 회원 화면과 같은 구성, 남색·파랑 계열 관리자 톤 */
+
 :root{--ink:#16243d;--navy:#13284d;--blue:#2a56b8;--blue-dark:#1d4396;--muted:#6d778a;--border:#dfe4ec;--pale:#f2f5fa;--white:#fff;--accent:#8fa6d4;
   --green:#1e7a52;--green-bg:#e6f4ec;--amber:#9a6510;--amber-bg:#fdf3df;--red:#b23a48;--red-bg:#fcecee}
 *{box-sizing:border-box}
@@ -24,7 +24,7 @@ h1{font-family:Georgia,"Malgun Gothic",serif;font-size:38px;line-height:1.5;lett
 h2{font-size:18px;letter-spacing:-.6px;font-weight:600;margin:4px 0 6px}
 .muted{color:var(--muted)}
 
-/* 로그인 */
+
 .login-layout{display:grid;grid-template-columns:1.2fr 1fr;gap:85px;padding:68px 42px 65px}
 .welcome>p{font-size:14px;line-height:1.9;color:var(--muted)}
 .art{height:190px;position:relative;overflow:hidden;margin:30px 20px 25px 0}
@@ -40,7 +40,7 @@ h2{font-size:18px;letter-spacing:-.6px;font-weight:600;margin:4px 0 6px}
 .login-help{border-top:1px solid var(--border);font-size:11px;color:var(--muted);margin-top:28px;padding-top:18px;line-height:1.9}
 .error{color:var(--red);font-size:12px;margin:12px 0}
 
-/* 버튼 */
+
 .primary,.btn.primary{background:var(--blue);border:1px solid var(--blue);color:#fff;padding:11px 18px;border-radius:3px;font-size:13px;display:inline-flex;align-items:center;justify-content:space-between;gap:24px}
 .primary:hover,.btn.primary:hover{background:var(--blue-dark)}
 .wide{width:100%;margin-top:14px;display:flex}
@@ -49,7 +49,7 @@ h2{font-size:18px;letter-spacing:-.6px;font-weight:600;margin:4px 0 6px}
 .btn.sm{padding:5px 11px;font-size:11px}
 .btn.danger{border-color:#efc6cc;color:var(--red)}.btn.danger:hover{background:var(--red-bg)}
 
-/* 로그인 후 상단 */
+
 .notice{padding:14px 16px;border-radius:3px;background:var(--amber-bg);color:var(--amber);border:1px solid #f1dfb8;margin:18px 0;font-size:13px}
 .notice.danger{background:var(--red-bg);color:#952f3c;border-color:#f1c9cf;font-weight:600;margin:24px 0 0}
 .overview{display:grid;grid-template-columns:1fr 1fr 1.7fr;border:1px solid var(--border);background:var(--pale);padding:22px 32px;gap:28px;margin-top:32px}
@@ -65,7 +65,7 @@ h2{font-size:18px;letter-spacing:-.6px;font-weight:600;margin:4px 0 6px}
 .tab.active{color:var(--blue);font-weight:700}
 .tab.active:after{content:"";position:absolute;bottom:-1px;left:0;right:0;height:2px;background:var(--blue)}
 
-/* 업무 화면 */
+
 .page-heading{padding:30px 0 6px}
 .page-heading h1{font-family:inherit;font-size:28px;font-weight:600;margin:8px 0 4px}
 .page-heading p{font-size:13px;margin:0}
@@ -125,7 +125,7 @@ footer span:last-child{margin-left:auto}
   .page-heading h1{font-size:24px}footer{flex-wrap:wrap;padding:22px 16px}footer span:last-child{margin-left:0}
 }
 
-/* 섹션·통계·상세 */
+
 .section-title{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin:34px 0 0;flex-wrap:wrap}
 .section-title:first-child{margin-top:0}
 .section-title h2{font-size:17px;margin:0}
@@ -156,7 +156,7 @@ tr.selected td{background:#eef3ff}
 @media(max-width:800px){.form.grid3{grid-template-columns:1fr}}
 .pill.off{background:#f1f3f7;color:#8a93a5}
 
-/* 표 정렬·검색 */
+
 th.sortable{cursor:pointer;user-select:none;white-space:nowrap}
 th.sortable:hover{color:var(--blue)}
 th.sortable::after{content:"↕";margin-left:5px;opacity:.35;font-size:10px}
@@ -165,16 +165,16 @@ th.sortable.desc::after{content:"▼";opacity:1;color:var(--blue)}
 th.sortable:focus-visible{outline:2px solid var(--blue);outline-offset:-2px}
 .searchbar{display:flex;justify-content:flex-end;margin-top:12px}
 .searchbar input{max-width:340px;margin-top:0;background:#fff}
-/* 좁은 화면에서 칸이 글자 단위로 꺾이지 않게 (표는 가로 스크롤) */
+
 .tablewrap td{white-space:nowrap}
 .tablewrap td .long, .facts dd{white-space:normal}
-/* 상세 카드 안 소제목·섹션 간격 */
+
 .card h3.sub-h{margin:32px 0 6px}
 .card + .section-title, .card + div > .section-title:first-child{margin-top:44px}
 #member-detail + div[data-roles] > .section-title:first-child{margin-top:44px}
 .export-block > .section-title:first-child{margin-top:48px}
 
-/* 확인 팝업 */
+
 dialog.confirm{border:1px solid var(--border);border-top:3px solid var(--navy);border-radius:4px;padding:28px 30px 24px;max-width:440px;width:calc(100% - 32px);color:var(--ink);box-shadow:0 20px 50px rgba(19,40,77,.25)}
 dialog.confirm::backdrop{background:rgba(19,40,77,.45)}
 dialog.confirm h2{font-size:19px;margin:8px 0 10px}
@@ -187,7 +187,7 @@ dialog.confirm textarea{display:block;width:100%;margin-top:7px;padding:10px 12p
 dialog.confirm textarea:focus{outline:0;border-color:var(--blue);box-shadow:0 0 0 3px rgba(42,86,184,.15)}
 .tablewrap td .sub-code{max-width:220px;overflow:hidden;text-overflow:ellipsis}
 
-/* 알림 (종) */
+
 .notif{position:relative}
 .bell{position:relative;display:grid;place-items:center;width:36px;height:36px;border:0;border-radius:50%;background:transparent;color:#4a5670;cursor:pointer}
 .bell:hover,.bell[aria-expanded="true"]{background:var(--pale);color:var(--blue)}
@@ -216,3 +216,10 @@ dialog.confirm textarea:focus{outline:0;border-color:var(--blue);box-shadow:0 0 
 .notif-ops{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
 .notif-ops .text-button{padding:2px 0;font-size:11px}
 .notif-empty{padding:36px 16px;text-align:center;font-size:12px;color:var(--muted)}
+
+
+#meeting-panel select { max-width: 100%; padding: 10px; margin: 12px 0; }
+#meeting-panel .meeting-card, #meeting-panel fieldset { border: 1px solid #d8e0df; padding: 16px; margin: 12px 0; }
+#meeting-panel fieldset input { display: block; width: 100%; margin: 8px 0; }
+#meeting-panel .matching-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+#meeting-panel button { cursor: pointer; padding: 8px 14px; margin: 4px; }

@@ -1,6 +1,6 @@
-// PrivacyGate 내부 화면
-// 메뉴 숨김은 사용 편의일 뿐 보안 통제가 아니다. 권한은 internal-api 가 매 요청 확인한다.
-// 서버 문자열은 모두 textContent 로만 넣는다 (innerHTML 금지, CSP 로 인라인 스크립트·스타일 차단).
+
+
+
 const state = { me: null, members: [], consents: {}, requests: [], filter: "" };
 const $ = (id) => document.getElementById(id);
 
@@ -21,16 +21,16 @@ async function api(path, options = {}) {
     options = { ...options, body: JSON.stringify(options.json) };
   }
   const res = await fetch(path, { ...options, method, headers, credentials: "same-origin" });
-  if (res.status === 401 && path !== "/api/me") showLogin();   // internal-api 자체 세션 만료만 401 (중계 401 은 서버가 500 으로 바꿈)
+  if (res.status === 401 && path !== "/api/me") showLogin();
   return res;
 }
 
-// 오류 응답 {"error": {code, message, trace_id}} 를 한 줄로
+
 async function describe(res) {
   try {
     const body = await res.json();
     if (body.error) return `${body.error.message} (${body.error.code}, 추적번호 ${body.error.trace_id})`;
-  } catch (_) { /* 본문 없음 */ }
+  } catch (_) {             }
   return `응답 ${res.status}`;
 }
 
@@ -40,7 +40,7 @@ async function getJson(path) {
   return res.json();
 }
 
-// 서버는 UTC 로 주고, 화면은 한국 시간으로 표시
+
 function toKst(iso) {
   return iso ? new Date(iso).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }) : "-";
 }
@@ -52,7 +52,7 @@ function showResult(el, text, ok) {
   el.hidden = false;
 }
 
-// ---- 표 그리기 도우미 (DOM API 만 사용) ----
+
 function el(tag, text, cls) {
   const node = document.createElement(tag);
   if (text !== undefined && text !== null) node.textContent = String(text);
@@ -89,10 +89,10 @@ function fill(bodyId, emptyId, rows) {
   $(emptyId).hidden = rows.length > 0;
 }
 function mono(text) { const s = el("span", text, "mono"); s.title = text || ""; return s; }
-// 가명 ID 가 있으면 가명으로, 없으면 UUID 앞 8자리. 마우스를 올리면 전체 UUID
+
 function who(pseudo, id) { const s = el("span", pseudo || short(id), pseudo ? "" : "mono"); s.title = id || ""; return s; }
 
-// ---- 화면 전환 ----
+
 function showLogin() {
   $("login-view").hidden = false;
   $("app-view").hidden = true;
@@ -117,12 +117,13 @@ function showApp() {
 
   let first = null;
   for (const btn of $("nav").querySelectorAll("button")) {
-    const visible = btn.dataset.roles.split(",").includes(role);
+    const visible = btn.dataset.roles.split(",").includes(role) &&
+      (btn.dataset.view !== "meetings" || state.me.meeting_scheduling === true);
     btn.hidden = !visible;
     if (visible && !first) first = btn.dataset.view;
     btn.onclick = () => selectView(btn.dataset.view);
   }
-  // 본문의 역할별 영역도 같은 규칙 (표시 편의일 뿐, 권한은 서버가 확인)
+
   for (const node of document.querySelectorAll("main [data-roles]")) {
     if (node.closest("#nav")) continue;
     node.hidden = !node.dataset.roles.split(",").includes(role);
@@ -138,6 +139,7 @@ const LOADERS = {
   manage: loadManage,
   evidence: loadReviews,
   approvals: loadApprovals,
+  meetings: loadMeetings,
 };
 
 function selectView(name) {
@@ -150,7 +152,7 @@ function selectView(name) {
   if (LOADERS[name]) LOADERS[name]().catch((e) => console.warn(e.message));
 }
 
-// ---- ① 담당 회원 조회 ----
+
 function memberStatus(m) {
   const p = pill(m.status || "active");
   if (m.status !== "withdraw_pending" || !m.withdraw_at) return p;
@@ -161,8 +163,8 @@ function memberStatus(m) {
   return d;
 }
 
-// 확인 팝업: choices = [{label, value, cls}] → 고른 value (취소·Esc 는 null)
-// input = "입력칸 이름" 을 주면 선택 입력칸을 보여 주고, 입력값은 state.askText 에 담는다
+
+
 function ask(title, message, choices, eyebrow = "CONFIRM", input = null) {
   const dlg = $("confirm-dialog");
   $("confirm-input-wrap").hidden = !input;
@@ -189,11 +191,11 @@ function withMark(text, ok) {
   if (ok) d.append(el("span", "✓ 증빙", "ok-mark"));
   return d;
 }
-// 직원 화면용: A-003(박도윤)
+
 const withName = (code, name) => (name ? `${code}(${name})` : code);
 const ageText = (m) => (m.age != null ? `만 ${m.age}세` : "-");
 
-// ---- 표 정렬·검색 (화면에서만, 서버가 준 목록 안에서) ----
+
 const EDU_RANK = { "고졸": 1, "전문대졸": 2, "4년제 대졸": 3, "대학원졸": 4 };
 const SORT_VALUE = {
   education_level: (m) => EDU_RANK[m.education_level] ?? null,
@@ -208,7 +210,7 @@ function sortAndFilter(items, st, fields) {
   return list.sort((a, b) => {
     const x = get(a), y = get(b);
     if (x == null && y == null) return 0;
-    if (x == null) return 1;                 // 빈 값은 항상 뒤로
+    if (x == null) return 1;
     if (y == null) return -1;
     const c = typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y), "ko");
     return c * st.dir;
@@ -280,16 +282,14 @@ async function showMember(memberId) {
     fact(f, "탈퇴 요청", `${by} · ${toKst(m.withdraw_requested_at)} → ${toKst(m.withdraw_at)} 삭제 예정`);
     fact(f, "탈퇴 사유", m.withdraw_reason || "(입력 안 함)", "long");
   }
-  const yes = (v) => el("span", v ? "매칭함" : "-", v ? "pill" : "muted");
-  fill("matches-body", "matches-empty", m.matches.map((x) =>
-    row([withName(x.counterpart_pseudo_id, x.counterpart_name), yes(x.i_matched), yes(x.they_matched),
-         x.matched ? el("span", "매칭 성사", "pill green") : el("span", "대기", "muted")])));
   const counselor = isCounselor();
+  const matchRoot = $("member-matching-panel");
+  matchRoot.hidden = !counselor;
+  if (counselor) StaffMatchingUI.render({root: matchRoot, memberId, api: matchingStaffApi, isCurrent: () => $("member-detail-title").textContent === m.pseudo_id});
   fill("consents-body", "consents-empty", m.consents.map((c) => {
     const cells = [withName(c.counterpart_pseudo_id, c.counterpart_name), c.item, c.purpose, toKst(c.expires_at),
                    pill(c.revoked_at ? "revoked" : c.valid ? "approved" : "rejected")];
-    if (counselor) cells.push(c.valid && m.status === "active"
-      ? actions(button("발송 요청", () => requestIntroduction(m, c), "btn sm primary")) : "-");
+    if (counselor) cells.push("기존 동의 기록 · 새 발송은 위 매칭 동의에서 요청");
     return row(cells);
   }));
   box.hidden = false;
@@ -298,7 +298,7 @@ async function showMember(memberId) {
 
 function alertInline(node, text) { node.textContent = text; node.hidden = false; }
 
-// ---- 반출 신청 (counselor) ----
+
 async function loadRequests() {
   const { items } = await getJson("/api/export-requests");
   fill("requests-body", "requests-empty", items.map((r) =>
@@ -306,7 +306,7 @@ async function loadRequests() {
          pill(r.request_status), toKst(r.expires_at), toKst(r.created_at)])));
 }
 
-// 매칭 동의로 소개 자료 발송 요청: 자료는 서버가 회원 DB 로 만든다
+
 async function requestIntroduction(m, c) {
   const out = $("request-result");
   const res = await api(`/api/members/${m.member_id}/introductions`, { method: "POST", json: { consent_id: c.consent_id } });
@@ -317,7 +317,7 @@ async function requestIntroduction(m, c) {
   loadRequests();
 }
 
-// ---- ② 회원 관리 (정보 수정·탈퇴) ----
+
 async function loadManage() {
   const { items } = await getJson("/api/members");
   state.members = items;
@@ -377,7 +377,7 @@ async function saveEdit(ev) {
   if (res.ok) { $("edit-card").hidden = true; loadManage(); }
 }
 
-// 탈퇴 예정 회원의 버튼: 총관리자 → 철회·즉시 탈퇴 / 상담 직원 → 본인 쪽 요청만 철회 (총관리자 요청은 안내만)
+
 function pendingActions(m) {
   if (state.me.role === "data_admin")
     return actions(button("탈퇴 철회", () => cancelWithdraw(m)), button("즉시 탈퇴", () => withdrawNow(m), "btn sm danger"));
@@ -387,7 +387,7 @@ function pendingActions(m) {
 
 const who2 = (m) => `${m.pseudo_id} ${m.name ?? ""}`.trim();
 
-// 탈퇴: 1) 확인 팝업 → 2) 한 번 더 확인 → 탈퇴 예정(7일 유예). 즉시 탈퇴·철회는 탈퇴 예정 줄의 버튼으로
+
 async function withdraw(m) {
   const first = await ask("회원 탈퇴", `${who2(m)} 회원을 탈퇴시키겠습니까?`, [
     { label: "확인", value: "yes", cls: "primary" }, { label: "취소", value: null }], "WITHDRAW", "탈퇴 사유 (선택, 200자 이내)");
@@ -399,7 +399,7 @@ async function withdraw(m) {
   await doWithdraw(m, "scheduled", reason);
 }
 
-// 탈퇴 예정 회원을 기한 전에 바로 삭제
+
 async function withdrawNow(m) {
   const first = await ask("즉시 탈퇴", `탈퇴 예정인 ${who2(m)} 회원을 기다리지 않고 지금 탈퇴시키겠습니까?`, [
     { label: "확인", value: "yes", cls: "primary" }, { label: "취소", value: null }], "WITHDRAW");
@@ -445,7 +445,7 @@ async function runExport() {
   loadExports().catch(() => {});
 }
 
-// ---- ③ 회원·서류 조회·심사·승인 ----
+
 async function loadReviews() {
   state.evidence = (await getJson("/api/evidence-files")).items;
   renderReviews();
@@ -469,7 +469,7 @@ function renderReviews() {
 }
 
 async function openEvidence(id) {
-  const win = window.open("", "_blank");       // 팝업 차단 회피: 클릭 시점에 창을 먼저 연다
+  const win = window.open("", "_blank");
   const res = await api(`/api/evidence-files/${id}/content`);
   if (!res.ok) {
     if (win) win.close();
@@ -487,7 +487,7 @@ async function review(id, result) {
   loadReviews();
 }
 
-// ---- 조회·심사·승인 (approver) ----
+
 async function loadApprovals() {
   state.requests = (await getJson("/api/export-requests")).items;
   renderApprovals();
@@ -530,7 +530,7 @@ async function showRequest(id) {
   fact(facts, "자료 주인 회원", r.member_pseudo_id ? withName(r.member_pseudo_id, r.member_name) : r.member_id);
   fact(facts, "받는 회원", r.recipient_pseudo_id ? withName(r.recipient_pseudo_id, r.recipient_name) : r.recipient_id);
   fact(facts, "동의", r.consent_label || short(r.consent_id));
-  fact(facts, "목적", r.purpose);
+  fact(facts, "목적", r.purpose === 'matching_introduction' ? '매칭 동의에 따른 검토 결과 제공' : r.purpose);
   fact(facts, "파일", r.label ? `${r.label}.json (v${r.file_version})` : `${short(r.file_id)} (v${r.file_version})`);
   fact(facts, "파일 해시", r.file_hash, "mono");
   fact(facts, "파일 검사", STATUS[r.scan_status]?.[0] || r.scan_status);
@@ -539,8 +539,12 @@ async function showRequest(id) {
   const prev = $("detail-preview");
   prev.replaceChildren();
   if (r.preview && typeof r.preview === "object") {
-    const names = { member_pseudo_id: "이름", age_band: "나이", job_group: "직군 · 직장", introduction: "상세" };
-    for (const [k, v] of Object.entries(r.preview)) fact(prev, names[k] || k, typeof v === "string" ? v : JSON.stringify(v), k === "introduction" ? "long" : "");
+    const names = { schema_version: "자료 형식", member_id: "자료 주인 UUID", recipient_id: "수신자 UUID", grant_id: "회원 공개 동의 ID", match_id: "매칭 ID", scopes: "제공 항목", purpose: "제공 목적", display_name: "이름", age_band: "나이", job_group: "직군 · 직장", introduction: "상세" };
+    for (const [k, v] of Object.entries(r.preview)) {
+      if (k === 'fields' && Array.isArray(v)) {
+        for (const field of v) fact(prev, field.label, `${field.value} · 검토 ${toKst(field.reviewed_at)}`, 'long');
+      } else fact(prev, names[k] || k, typeof v === "string" ? v : JSON.stringify(v), k === "introduction" ? "long" : "");
+    }
   } else {
     fact(prev, "미리보기", "표시할 수 없습니다 (검사 미통과 또는 반출 금지 파일)");
   }
@@ -567,7 +571,7 @@ async function decide(id, action) {
 }
 
 async function revoke(label, approvalId) {
-  // 소개 자료 이름(A-001_file1)으로 회수. 이름이 없는 예전 건만 approval_id 로
+
   const res = label
     ? await api("/api/approvals/revoke-by-label", { method: "POST", json: { label } })
     : await api(`/api/approvals/${encodeURIComponent(approvalId)}/revoke`, { method: "POST", json: {} });
@@ -575,7 +579,7 @@ async function revoke(label, approvalId) {
   loadApprovals();
 }
 
-// ---- 알림 (오른쪽 위 종) ----
+
 const notif = { items: [], selected: new Set(), timer: null };
 const KIND_ICON = { evidence_submitted: "📄", match_made: "💞", intro_requested: "📨", intro_decided: "✅",
   withdraw_requested: "⏳", withdraw_cancelled: "↩", member_deleted: "🗑", member_export: "⚠", member_assigned: "👤" };
@@ -620,7 +624,7 @@ function renderNotifications() {
     const txt = el("span", null, "notif-text");
     txt.append(el("strong", x.title), el("span", x.body || "", "notif-body"), el("span", timeAgo(x.created_at), "notif-time"));
     main.append(txt);
-    main.onclick = async () => {                       // 누르면 읽음 + 해당 화면으로
+    main.onclick = async () => {
       if (!x.read) await markNotifications([x.notification_id]);
       if (x.link_view && document.querySelector(`#nav button[data-view="${x.link_view}"]:not([hidden])`)) {
         toggleNotifPanel(false);
@@ -685,7 +689,7 @@ function initNotifications() {
   };
   loadNotifications();
   clearInterval(notif.timer);
-  notif.timer = setInterval(() => { if (!document.hidden) loadNotifications(); }, 30000);   // 30초마다 확인
+  notif.timer = setInterval(() => { if (!document.hidden) loadNotifications(); }, 30000);
 }
 
 async function logout() {
@@ -722,3 +726,30 @@ async function init() {
 }
 
 init();
+
+
+async function loadMeetings() {
+  await StaffMatchingUI.render({root: $('matching-overview-panel'), api: matchingStaffApi});
+  const root = $('meeting-panel');
+  root.textContent = '담당 매칭을 불러오는 중입니다.';
+  try {
+    await MeetingStaffUI.render({
+      root,
+      matchLabel: match => match.label || `담당 매칭 ${short(match.match_id)}`,
+      api: async (path, options = {}) => {
+        const res = await api(path, {method: options.method || 'GET',
+          ...(options.body !== undefined ? {json: options.body} : {})});
+        if (!res.ok) throw new Error(await describe(res));
+        return res.json();
+      },
+      toast: message => { $('meeting-message').textContent = message; },
+      isCurrent: () => Boolean(document.querySelector('#nav button.active[data-view="meetings"]'))
+    });
+  } catch (error) { root.textContent = error.message; }
+}
+
+async function matchingStaffApi(path, options = {}) {
+  const res = await api(path, {method: options.method || "GET", ...(options.body !== undefined ? {json: options.body} : {})});
+  if (!res.ok) throw new Error(await describe(res));
+  return res.json();
+}
