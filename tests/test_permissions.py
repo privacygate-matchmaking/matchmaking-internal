@@ -222,7 +222,7 @@ class Permissions(unittest.TestCase):
                 s = c.get("/api/internal/my-status").json()
                 self.assertEqual((s["status"], s["by"], s["can_cancel"]), ("withdraw_pending", "self", True))
                 self.assertIsNone(s["reason"])               # 본인 신청이면 사유를 다시 보여 주지 않음
-                self.assertEqual(c.get("/api/internal/my-consents").status_code, 403)   # 유예 중 회원 기능 막힘
+                self.assertEqual(c.get("/api/internal/my-matches").status_code, 403)   # 유예 중 회원 기능 막힘
             finally:
                 self.assertEqual(c.post("/api/internal/my-withdrawal/cancel").status_code, 200)
         self.assertEqual(self.status_of(target), "active")
