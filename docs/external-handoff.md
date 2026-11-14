@@ -1,5 +1,7 @@
 # 내부 변경 정리 — 외부(external-web·external-api·transfer-api)·Wazuh 담당 전달용
 
+> 2026-11-14 후속: 아래는 변경 전 전달 원문입니다. 매칭 4·8절과 소개 파일 6절은 [유료 매칭·UUID 연결](paid-matching-integration.md)의 새 코드 계약으로 대체됩니다. 기존 DB 초기화는 자동 수행하지 않았습니다.
+
 이번 주 내부(internal-api·privacygate)에서 바뀐 것 중 **외부 쪽에 영향이 있는 것만** 정리했습니다.
 반출 신청·승인·다운로드 흐름과 기존 API 형식은 그대로입니다. 아래 "외부에서 할 일"만 반영해 주시면 됩니다.
 

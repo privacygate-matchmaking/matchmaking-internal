@@ -1,11 +1,11 @@
-"""내부 업무 API (docs/api-spec.md 의 '내부').
 
-원칙
-- 권한 검사(역할·담당·배정·소유)는 자료를 읽거나 파일을 만들기 전에 끝낸다.
-- 담당이 아닌 회원·배정되지 않은 증빙은 404 로 답해 존재 자체를 알리지 않는다.
-- 응답 본문에는 판단 근거를 넣지 않고 감사 로그에만 남긴다.
-- 회원 본인 기능은 transfer-api 서비스 토큰 + 회원 토큰을 검증하고, 회원은 토큰 sub 로만 정한다.
-"""
+
+
+
+
+
+
+
 import csv
 import io
 import json
@@ -38,7 +38,7 @@ def _iso(value) -> str | None:
 
 
 def _member_of(user_id: str) -> dict:
-    """회원 토큰 sub → 회원 행. 업무 DB 에 없는 회원이면 거부."""
+
     with db.connection() as conn:
         row = conn.execute("SELECT member_id, pseudo_id FROM members WHERE user_id = %s AND status = 'active'",
                            (user_id,)).fetchone()
@@ -49,24 +49,24 @@ def _member_of(user_id: str) -> dict:
 
 @router.get("/me")
 def me(request: Request, principal: Principal = Depends(require(*STAFF_ROLES))):
-    """화면 표시용. 역할은 서버가 매 요청 확인하므로 화면은 이 값을 표시에만 쓴다."""
+
     return {"user_id": principal.user_id, "pseudo_id": principal.pseudo_id, "role": principal.role,
             "csrf_token": request.state.csrf_token,
-            "gate_mode": gate_mode.current()}      # baseline 이면 화면 상단에 경고 표시
+            "gate_mode": gate_mode.current(), "meeting_scheduling": True}
 
 
 # ======================================================================
-# 회원 조회·관리 (counselor: 담당 회원만 / data_admin=총관리자: 전체)
+
 # ======================================================================
 MEMBER_ROLES = (Role.COUNSELOR, Role.DATA_ADMIN)
-WITHDRAW_GRACE_DAYS = 7          # 탈퇴 유예 기간
+WITHDRAW_GRACE_DAYS = 7
 EDUCATION_LEVELS = ("고졸", "전문대졸", "4년제 대졸", "대학원졸")
 
-# 담당 범위 조건: counselor 는 assignments 에 있는 회원만, data_admin 은 전체
+
 SCOPE_SQL = """(%(role)s = 'data_admin' OR EXISTS (SELECT 1 FROM assignments a
                  WHERE a.member_id = m.member_id AND a.user_id = %(uid)s))"""
 
-# 직원 화면에 보이는 프로필 항목 (연락처는 넣지 않는다)
+
 PROFILE_COLS = """m.member_id, m.pseudo_id, m.name, m.gender, m.birth_date, m.height_cm, m.weight_kg,
                   m.education_level, m.school, m.major, m.job_group, m.company, m.introduction,
                   m.education_verified, m.employment_verified, m.status, m.withdraw_requested_at, m.withdraw_at, m.withdraw_reason, m.created_at,
@@ -80,7 +80,7 @@ def _scope(principal: Principal) -> dict:
 
 
 def _age(birth_date) -> int | None:
-    """만 나이."""
+
     if not birth_date:
         return None
     today = _now().date()
@@ -101,7 +101,7 @@ def _profile(r) -> dict:
 
 
 def _member_in_scope(conn, principal: Principal, member_id) -> dict:
-    """범위 밖 회원은 404 (존재 여부를 알리지 않음)."""
+
     row = conn.execute(f"SELECT {PROFILE_COLS} FROM members m WHERE m.member_id = %(mid)s AND {SCOPE_SQL}",
                        {**_scope(principal), "mid": member_id}).fetchone()
     if row is None:
@@ -111,8 +111,8 @@ def _member_in_scope(conn, principal: Principal, member_id) -> dict:
 
 @router.get("/members")
 def list_members(request: Request, principal: Principal = Depends(require(*MEMBER_ROLES))):
-    """회원 목록: 프로필(회원 코드·이름·성별·만 나이·키·몸무게·학력·직군·직장·소개·증빙 상태)과 담당 직원·상태.
-    연락처는 주지 않는다."""
+
+
     with db.connection() as conn:
         rows = conn.execute(
             f"""SELECT {PROFILE_COLS},
@@ -133,7 +133,7 @@ def list_members(request: Request, principal: Principal = Depends(require(*MEMBE
 @router.get("/members/{member_id}")
 def get_member(member_id: uuid.UUID, request: Request,
                principal: Principal = Depends(require(*MEMBER_ROLES))):
-    """회원 상세: 프로필 + 이 회원이 정보 주체인 동의 + 매칭 상태. 범위 밖이면 404."""
+
     with db.connection() as conn:
         m = _member_in_scope(conn, principal, member_id)
         consents = conn.execute(
@@ -143,7 +143,7 @@ def get_member(member_id: uuid.UUID, request: Request,
                  FROM consents c JOIN members cm ON cm.member_id = c.counterpart_member_id
                 WHERE c.member_id = %s ORDER BY c.granted_at DESC""",
             (member_id,)).fetchall()
-        matches = _match_rows(conn, member_id, staff=True)
+        matches = []
     audit.allow(request, target_type="member", target_id=m["pseudo_id"])
     return {**_profile(m),
             "consents": [{"consent_id": str(c["consent_id"]), "consent_label": f"C-{c['consent_no']}",
@@ -171,7 +171,7 @@ class MemberUpdateIn(BaseModel):
     introduction: str | None = Field(default=None, max_length=200)
 
 
-# 이 항목이 바뀌면 해당 증빙을 다시 받아야 한다
+
 EDU_FIELDS = {"education_level", "school", "major"}
 JOB_FIELDS = {"company"}
 
@@ -180,11 +180,11 @@ JOB_FIELDS = {"company"}
 def update_member(member_id: uuid.UUID, body: MemberUpdateIn, request: Request,
                   principal: Principal = Depends(require(*MEMBER_ROLES)),
                   _csrf: None = Depends(require_csrf)):
-    """회원 정보 수정 (연락처 제외). 담당 회원(총관리자는 전체), 탈퇴 회원은 불가.
-    학력 항목이 바뀌면 학력 증빙, 직장이 바뀌면 재직 증빙 확인이 풀린다 (다시 심사). ※ 명세 외 추가"""
+
+
     fields = body.model_dump(exclude_unset=True)
     if "name" in fields and not fields["name"]:
-        fields.pop("name")                                       # 이름은 비울 수 없다
+        fields.pop("name")
     if not fields:
         raise GateError(ErrorCode.INVALID_REQUEST, "nothing_to_update")
     if fields.get("birth_date") and not (date(1900, 1, 1) <= fields["birth_date"] <= _now().date()):
@@ -198,7 +198,7 @@ def update_member(member_id: uuid.UUID, body: MemberUpdateIn, request: Request,
             fields["education_verified"] = False
         if JOB_FIELDS & changed:
             fields["employment_verified"] = False
-        sets = ", ".join(f"{k} = %({k})s" for k in fields)       # 키는 모델 필드 이름으로 고정
+        sets = ", ".join(f"{k} = %({k})s" for k in fields)
         conn.execute(f"UPDATE members SET {sets} WHERE member_id = %(mid)s", {**fields, "mid": member_id})
         row = conn.execute(f"SELECT {PROFILE_COLS} FROM members m WHERE m.member_id = %s", (member_id,)).fetchone()
     audit.allow(request, target_type="member", target_id=m["pseudo_id"])
@@ -207,19 +207,19 @@ def update_member(member_id: uuid.UUID, body: MemberUpdateIn, request: Request,
 
 class WithdrawIn(BaseModel):
     mode: str = Field(default="scheduled", pattern="^(scheduled|immediate)$")
-    reason: str | None = Field(default=None, max_length=200)     # 탈퇴 사유 (선택)
+    reason: str | None = Field(default=None, max_length=200)
 
 
 @router.post("/members/{member_id}/withdraw")
 def withdraw_member(member_id: uuid.UUID, body: WithdrawIn, request: Request,
                     principal: Principal = Depends(require(*MEMBER_ROLES)),
                     _csrf: None = Depends(require_csrf)):
-    """탈퇴 처리. ※ 명세 외 추가
-    - scheduled: 탈퇴 예정(유예 7일). 그동안 회원 기능은 막히고(매칭·제공 불가) 직원이 철회할 수 있다.
-      기한이 지나면 주기 작업이 회원 정보를 DB 에서 삭제한다.
-    - immediate: 바로 삭제 (유예 중인 회원도 가능). 총관리자(data_admin)만. 회원·동의·매칭·증빙(파일 포함)·소개 자료 기록이 지워진다.
-    삭제 범위는 DB 함수 purge_member 로 고정하며, 감사 로그(회원 코드)는 남긴다."""
-    # 즉시 탈퇴(바로 삭제)는 총관리자만
+
+
+
+
+
+
     if body.mode == "immediate" and principal.role != Role.DATA_ADMIN.value:
         raise GateError(ErrorCode.ACCESS_DENIED, "immediate_withdraw_admin_only")
     reason = (body.reason or "").strip() or None
@@ -236,13 +236,13 @@ def withdraw_member(member_id: uuid.UUID, body: WithdrawIn, request: Request,
                 (WITHDRAW_GRACE_DAYS, principal.user_id, reason, member_id)).fetchone()
             who = f"{m['pseudo_id']} {m['name']}"
             text = f"{who} 회원이 탈퇴 예정이 되었습니다 (7일 후 삭제){' · 사유: ' + reason if reason else ''}"
-            if principal.role == Role.DATA_ADMIN.value:      # 총관리자 요청 → 담당 상담 직원에게
+            if principal.role == Role.DATA_ADMIN.value:
                 notify.to_counselors_of(conn, member_id, "withdraw_requested", "총관리자가 탈퇴 요청함", text, "manage")
-            else:                                             # 상담 직원 요청 → 총관리자에게
+            else:
                 notify.to_role(conn, "data_admin", "withdraw_requested", f"탈퇴 요청 ({principal.pseudo_id})", text, "manage")
         else:
-            # 회원 탈퇴 안내용 요청자·사유 기록 (purge_member 가 읽음).
-            # 활성 회원 → 총관리자 처리로 기록. 유예 중 → 처음 요청자를 유지하고, 직원 요청 건이면 새 사유로 바꿀 수 있다
+
+
             conn.execute(
                 """UPDATE members SET
                           withdraw_requested_by = CASE WHEN status = 'active' THEN %(by)s ELSE withdraw_requested_by END,
@@ -252,7 +252,7 @@ def withdraw_member(member_id: uuid.UUID, body: WithdrawIn, request: Request,
                               ELSE withdraw_reason END
                     WHERE member_id = %(mid)s""",
                 {"by": principal.user_id, "reason": reason, "mid": member_id})
-            # 즉시 삭제 전에 담당 직원에게 알림 (삭제 뒤에는 담당 관계도 지워짐)
+
             notify.to_counselors_of(conn, member_id, "member_deleted", "회원 즉시 탈퇴",
                                     f"{m['pseudo_id']} {m['name']} 회원 정보가 총관리자에 의해 삭제되었습니다.",
                                     "manage", exclude=principal.user_id)
@@ -268,7 +268,7 @@ def withdraw_member(member_id: uuid.UUID, body: WithdrawIn, request: Request,
 def cancel_withdraw(member_id: uuid.UUID, request: Request,
                     principal: Principal = Depends(require(*MEMBER_ROLES)),
                     _csrf: None = Depends(require_csrf)):
-    """탈퇴 철회 (유예 기간 안에서만). 총관리자가 요청한 탈퇴는 총관리자만 철회할 수 있다. ※ 명세 외 추가"""
+
     with db.connection() as conn:
         m = _member_in_scope(conn, principal, member_id)
         if m["status"] != "withdraw_pending":
@@ -286,13 +286,13 @@ def cancel_withdraw(member_id: uuid.UUID, request: Request,
 
 
 # ======================================================================
-# 매칭 소개 자료 발송 요청 (counselor). 자료는 직원이 올리지 않고 서버가 회원 DB 로 만든다
+
 # ======================================================================
 def _detail_profile(m, name: str) -> dict:
-    """매칭·동의 후 상대에게 주는 소개 자료.
-    중계 검사 형식(4개 항목, 각 300자 이하)에 맞춘다: member_pseudo_id 자리에 실명(회원 코드는 관리자 전용이라 넣지 않음),
-    age_band 자리에 만 나이.
-    직장은 재직 증빙이 통과된 경우에만 넣는다. 연락처·증빙 원본은 넣지 않는다."""
+
+
+
+
     age = _age(m["birth_date"])
     edu = m["education_level"] or "비공개"
     if m["school"]:
@@ -305,7 +305,7 @@ def _detail_profile(m, name: str) -> dict:
         f"키 {m['height_cm']}cm · 몸무게 {m['weight_kg']}kg (본인 신고)" if m["height_cm"] else None,
         f"학력 {edu}",
         f"소개 {m['introduction']}" if m["introduction"] else None] if x)
-    return {"member_pseudo_id": name[:300], "age_band": f"만 {age}세" if age is not None else "비공개",
+    return {"schema_version": 2, "member_id": str(m["member_id"]), "display_name": name[:300], "age_band": f"만 {age}세" if age is not None else "비공개",
             "job_group": job[:300], "introduction": body[:300]}
 
 
@@ -317,11 +317,11 @@ class IntroductionIn(BaseModel):
 def request_introduction(member_id: uuid.UUID, body: IntroductionIn, request: Request,
                          principal: Principal = Depends(require(Role.COUNSELOR)),
                          _csrf: None = Depends(require_csrf)):
-    """매칭으로 생긴 유효 동의(이 회원 → 상대)로 소개 자료 발송을 요청한다. ※ 명세 외 추가
-    1) 담당 회원·유효 동의·상대 외부 계정 확인
-    2) 소개 자료(실명·만 나이·키·몸무게·학력·직군·(재직 확인 시)직장·소개)를 회원 DB 에서 만든다
-       — 연락처·증빙 원본은 넣지 않는다
-    3) 중계에 파일 등록(형식 검사) → 발송 신청(승인 대기). 승인은 다른 승인자가 한다."""
+
+
+
+
+
     with db.connection() as conn:
         m = _member_in_scope(conn, principal, member_id)
         if m["status"] != "active":
@@ -341,14 +341,14 @@ def request_introduction(member_id: uuid.UUID, body: IntroductionIn, request: Re
                            (member_id,)).fetchone()["n"]
     profile = _detail_profile(m, name)
     data = json.dumps(profile, ensure_ascii=False).encode("utf-8")
-    label = f"{m['pseudo_id']}_file{seq}"                      # 관리자 화면용 이름 (예: A-001_file1)
+    label = f"{m['pseudo_id']}_file{seq}"
     up = transfer_client.call(request, "POST", "/api/transfer-files",
                               files={"file": (f"{label}.json", data, "application/json")})
     if up.status_code != 201:
         audit.deny(request, f"transfer_status_{up.status_code}")
         return transfer_client.relay(up)
     file_id = up.json()["file_id"]
-    # 제공 기한: 최대 7일, 동의 만료를 넘지 않게 (경계보다 1분 앞)
+
     expires = min(_now() + timedelta(days=7), c["expires_at"]) - timedelta(minutes=1)
     req = transfer_client.call(request, "POST", "/api/export-requests", json={
         "file_id": file_id, "member_id": str(member_id), "recipient_id": str(c["recipient_id"]),
@@ -368,7 +368,7 @@ def request_introduction(member_id: uuid.UUID, body: IntroductionIn, request: Re
 
 
 # ======================================================================
-# 관리자 전체 회원 내보내기 (공격 ① 대상)
+
 # ======================================================================
 EXPORT_COLUMNS = ("pseudo_id", "name", "gender", "birth_date", "height_cm", "weight_kg", "education_level",
                   "school", "major", "job_group", "company", "contact_phone", "contact_email")
@@ -378,8 +378,8 @@ EXPORT_COLUMNS = ("pseudo_id", "name", "gender", "birth_date", "height_cm", "wei
 def create_member_export(request: Request,
                          principal: Principal = Depends(require(Role.DATA_ADMIN, baseline_open=True)),
                          _csrf: None = Depends(require_csrf)):
-    """전체 회원 CSV 를 만들어 암호화 저장하고 export_id 와 건수만 응답한다 (내려받기 경로 없음).
-    GATE_MODE=baseline 이면 역할 검사를 건너뛴다 (공격 ① 비교 시연용)."""
+
+
     with db.connection() as conn:
         rows = conn.execute(f"SELECT {', '.join(EXPORT_COLUMNS)} FROM members ORDER BY pseudo_id").fetchall()
     buf = io.StringIO()
@@ -396,7 +396,7 @@ def create_member_export(request: Request,
             """INSERT INTO member_exports (export_id, created_by, row_count, storage_key, file_hash)
                VALUES (%s, %s, %s, %s, %s) RETURNING created_at""",
             (export_id, principal.user_id, len(rows), key, storage.sha256_hex(data))).fetchone()
-        # 전체 내보내기는 모든 총관리자에게 알림 (상담 직원이 실행했다면 이상 행위)
+
         odd = principal.role != Role.DATA_ADMIN.value
         notify.to_role(conn, "data_admin", "member_export",
                        "⚠ 비정상 전체 회원 내보내기" if odd else "전체 회원 내보내기 실행",
@@ -408,7 +408,7 @@ def create_member_export(request: Request,
 
 @router.get("/admin/member-exports")
 def admin_list_exports(request: Request, principal: Principal = Depends(require(Role.DATA_ADMIN))):
-    """전체 회원 내보내기 내역 (파일 내용 없음). 이상 내보내기 확인용. ※ 명세 외 추가"""
+
     with db.connection() as conn:
         rows = conn.execute(
             """SELECT e.export_id, u.pseudo_id, u.role, e.row_count, e.transfer_file_id, e.created_at
@@ -425,9 +425,9 @@ def admin_list_exports(request: Request, principal: Principal = Depends(require(
 def register_export_to_transfer(export_id: uuid.UUID, request: Request,
                                 principal: Principal = Depends(require(Role.COUNSELOR)),
                                 _csrf: None = Depends(require_csrf)):
-    """내보내기 결과를 중계 반출 대기 영역에 등록한다 (공격 연결 단계). ※ 명세 외 추가
-    본인이 만든 내보내기만. enforce 에서는 counselor 가 내보내기를 만들 수 없으므로 대상이 없다.
-    파일 바이트를 multipart 로 transfer-api POST /api/transfer-files 에 보낸다 (CSV 는 중계에서 blocked)."""
+
+
+
     with db.connection() as conn:
         row = conn.execute("SELECT storage_key, transfer_file_id FROM member_exports "
                            "WHERE export_id = %s AND created_by = %s",
@@ -451,14 +451,14 @@ def register_export_to_transfer(export_id: uuid.UUID, request: Request,
 
 
 # ======================================================================
-# 증빙 (회원 제출 → data_admin 심사)
+
 # ======================================================================
 @router.post("/evidence-files", status_code=201)
 async def submit_evidence(request: Request, file: UploadFile = File(...),
                           kind: str = Form("education", pattern="^(education|employment)$"),
                           member: Principal = Depends(member_via_transfer)):
-    """회원 증빙 제출 (회원 → external-api → transfer-api → 여기). PDF, 최대 2MiB.
-    본인(토큰 sub 의 회원) 명의로만 접수하고 AES-GCM 으로 암호화해 저장한다."""
+
+
     s = get_settings()
     data = await file.read(s.evidence_max_bytes + 1)
     if len(data) > s.evidence_max_bytes:
@@ -486,7 +486,7 @@ async def submit_evidence(request: Request, file: UploadFile = File(...),
 
 @router.get("/evidence-files")
 def list_evidence(request: Request, principal: Principal = Depends(require(*MEMBER_ROLES))):
-    """심사할 증빙 목록: counselor 는 담당 회원의 증빙만, 총관리자는 전체. 원본 내용은 넣지 않는다. ※ 명세 외 추가"""
+
     with db.connection() as conn:
         rows = conn.execute(
             f"""SELECT e.file_id, m.pseudo_id, m.name, m.member_id, e.kind, e.status, e.created_at,
@@ -506,7 +506,7 @@ def list_evidence(request: Request, principal: Principal = Depends(require(*MEMB
 
 
 def _assigned_evidence(conn, file_id, principal: Principal) -> dict:
-    """담당 회원의 증빙(총관리자는 전체)만. 범위 밖이면 404."""
+
     row = conn.execute(f"""SELECT e.file_id, e.member_id, e.kind, e.storage_key, e.status FROM evidence_files e
                              JOIN members m ON m.member_id = e.member_id
                             WHERE e.file_id = %(fid)s AND {SCOPE_SQL}""",
@@ -519,8 +519,8 @@ def _assigned_evidence(conn, file_id, principal: Principal) -> dict:
 @router.get("/evidence-files/{file_id}/content")
 def read_evidence(file_id: uuid.UUID, request: Request,
                   principal: Principal = Depends(require(*MEMBER_ROLES))):
-    """담당 직원(총관리자는 전체)만, 심사 중(submitted·in_review)에만 복호화해 보여 준다.
-    처음 열면 상태가 in_review 로 바뀌고 연 직원이 심사자로 기록된다. 브라우저 저장·캐시를 막는 헤더를 붙인다."""
+
+
     with db.connection() as conn:
         row = _assigned_evidence(conn, file_id, principal)
         if row["status"] not in ("submitted", "in_review") or not row["storage_key"]:
@@ -544,7 +544,7 @@ class ReviewIn(BaseModel):
 def review_evidence(file_id: uuid.UUID, body: ReviewIn, request: Request,
                     principal: Principal = Depends(require(*MEMBER_ROLES)),
                     _csrf: None = Depends(require_csrf)):
-    """심사 결과 저장(통과·반려) → 상태 reviewed, 원본 삭제 기한 = 지금 + 보관 기간."""
+
     s = get_settings()
     delete_after = _now() + timedelta(days=s.evidence_retention_days)
     with db.connection() as conn:
@@ -557,7 +557,7 @@ def review_evidence(file_id: uuid.UUID, body: ReviewIn, request: Request,
                                reviewer_user_id = %s WHERE file_id = %s""",
                      (delete_after, principal.user_id, file_id))
         if body.result == "passed":
-            # 학력 증빙 통과 → 매칭 가능, 재직 증빙 통과 → 소개 자료에 직장 포함
+
             flag = "education_verified" if row["kind"] == "education" else "employment_verified"
             conn.execute(f"UPDATE members SET {flag} = true WHERE member_id = %s", (row["member_id"],))
     audit.allow(request, target_type="evidence", target_id=str(file_id))
@@ -567,7 +567,7 @@ def review_evidence(file_id: uuid.UUID, body: ReviewIn, request: Request,
 
 @router.get("/internal/my-evidence-files")
 def my_evidence_files(request: Request, member: Principal = Depends(member_via_transfer)):
-    """내가 제출한 증빙의 상태만. 원본·심사자 정보는 주지 않는다. ※ 명세 외 추가"""
+
     owner = _member_of(member.user_id)
     with db.connection() as conn:
         rows = conn.execute(
@@ -581,7 +581,7 @@ def my_evidence_files(request: Request, member: Principal = Depends(member_via_t
 
 
 # ======================================================================
-# 관계·동의 (transfer-api 가 확인 / 회원 본인이 관리)
+
 # ======================================================================
 class DisclosureIn(BaseModel):
     member_id: uuid.UUID
@@ -594,11 +594,11 @@ class DisclosureIn(BaseModel):
 @router.post("/internal/disclosure-checks")
 def disclosure_check(body: DisclosureIn, request: Request,
                      claims: dict = Depends(require_service("transfer-api"))):
-    """정보 주체(member_id)가 수신자(recipient_id)에게 해당 항목·목적으로 유효한 동의를 했고,
-    두 사람이 소개된 관계인지 확인한다. 결과만 답하고 근거는 감사 로그에 남긴다."""
+
+
     with db.connection() as conn:
         row = conn.execute(
-            """SELECT c.expires_at, m.pseudo_id
+            """SELECT c.expires_at, m.member_id
                  FROM consents c
                  JOIN members m  ON m.member_id = c.member_id
                  JOIN members rm ON rm.member_id = c.counterpart_member_id
@@ -612,12 +612,12 @@ def disclosure_check(body: DisclosureIn, request: Request,
         audit.deny(request, "consent_or_relation_invalid")
         return {"allowed": False}
     audit.allow(request, target_type="consent", target_id=str(body.consent_id))
-    return {"allowed": True, "expires_at": _iso(row["expires_at"]), "member_pseudo_id": row["pseudo_id"]}
+    return {"allowed": True, "expires_at": _iso(row["expires_at"]), "member_id": str(row["member_id"])}
 
 
 @router.get("/internal/my-consents")
 def my_consents(request: Request, member: Principal = Depends(member_via_transfer)):
-    """내 동의 목록 + 동의할 수 있는 소개 상대(counterparts). ※ 명세 외 추가"""
+
     owner = _member_of(member.user_id)
     with db.connection() as conn:
         items = conn.execute(
@@ -648,7 +648,7 @@ class ConsentIn(BaseModel):
 
 @router.post("/internal/my-consents", status_code=201)
 def create_consent(body: ConsentIn, request: Request, member: Principal = Depends(member_via_transfer)):
-    """동의 등록. 본인 명의로만, 소개된 상대에게만, 만료는 미래 1년 이내."""
+
     owner = _member_of(member.user_id)
     expires = body.expires_at if body.expires_at.tzinfo else body.expires_at.replace(tzinfo=timezone.utc)
     if not (_now() < expires <= _now() + timedelta(days=MAX_CONSENT_DAYS)):
@@ -669,7 +669,7 @@ def create_consent(body: ConsentIn, request: Request, member: Principal = Depend
 
 @router.post("/internal/my-consents/{consent_id}/revoke")
 def revoke_consent(consent_id: uuid.UUID, request: Request, member: Principal = Depends(member_via_transfer)):
-    """동의 철회 → 이후 이 동의에 기댄 신청·승인·다운로드는 disclosure-checks 에서 거부된다."""
+
     owner = _member_of(member.user_id)
     with db.connection() as conn:
         row = conn.execute("SELECT revoked_at FROM consents WHERE consent_id = %s AND member_id = %s",
@@ -685,15 +685,12 @@ def revoke_consent(consent_id: uuid.UUID, request: Request, member: Principal = 
 
 
 # ======================================================================
-# 매칭 (회원 본인, transfer-api 경유). 서로 매칭을 누르면 양쪽 프로필 제공 동의를 만든다
+
 # ======================================================================
-MATCH_CONSENT_ITEM = "profile"
-MATCH_CONSENT_PURPOSE = "introduction"
-MATCH_CONSENT_DAYS = 30
 
 
 def _public_label(birth_date, education_level) -> str:
-    """회원 화면용 상대 표시 (회원 코드·실명 대신). 예: '소개 상대 · 만 32세 · 4년제 대졸'"""
+
     parts = ["소개 상대"]
     age = _age(birth_date)
     if age is not None:
@@ -703,118 +700,31 @@ def _public_label(birth_date, education_level) -> str:
     return " · ".join(parts)
 
 
-def _match_rows(conn, member_id, staff: bool = False) -> list[dict]:
-    """소개된 상대별 매칭 상태: 내가 눌렀는지, 상대가 눌렀는지, 성사 여부.
-    회원용(staff=False)에는 회원 코드를 넣지 않는다 (코드는 관리자 전용)."""
-    rows = conn.execute(
-        """SELECT cm.member_id, cm.pseudo_id, cm.name, cm.birth_date, cm.height_cm, cm.weight_kg,
-                  cm.education_level, cm.education_verified, cm.job_group, cm.introduction,
-                  mine.created_at AS i_at, theirs.created_at AS they_at
-             FROM introductions i
-             JOIN members cm ON cm.member_id = i.counterpart_member_id AND cm.status = 'active'
-             LEFT JOIN matches mine   ON mine.member_id = i.member_id AND mine.counterpart_member_id = cm.member_id
-                                     AND mine.cancelled_at IS NULL
-             LEFT JOIN matches theirs ON theirs.member_id = cm.member_id AND theirs.counterpart_member_id = i.member_id
-                                     AND theirs.cancelled_at IS NULL
-            WHERE i.member_id = %s ORDER BY cm.pseudo_id""", (member_id,)).fetchall()
-    return [{"counterpart_member_id": str(r["member_id"]),
-             **({"counterpart_pseudo_id": r["pseudo_id"], "counterpart_name": r["name"]} if staff else {}),
-             "counterpart_label": _public_label(r["birth_date"], r["education_level"]),
-             # 매칭 전 공개 카드: 만 나이·키·몸무게·학력 구분(학교 없음)·소개 (회원 코드·실명·학교·직장·연락처 없음)
-             "card": {"age": _age(r["birth_date"]), "height_cm": r["height_cm"], "weight_kg": r["weight_kg"],
-                      "education_level": r["education_level"], "introduction": r["introduction"]},
-             "i_matched": r["i_at"] is not None, "they_matched": r["they_at"] is not None,
-             "matched": r["i_at"] is not None and r["they_at"] is not None,
-             "matched_at": _iso(max(r["i_at"], r["they_at"])) if r["i_at"] and r["they_at"] else None}
-            for r in rows]
-
-
 @router.get("/internal/my-matches")
 def my_matches(request: Request, member: Principal = Depends(member_via_transfer)):
-    """소개된 상대 목록과 매칭 상태. ※ 명세 외 추가"""
-    owner = _member_of(member.user_id)
-    with db.connection() as conn:
-        items = _match_rows(conn, owner["member_id"])
-        verified = conn.execute("SELECT education_verified FROM members WHERE member_id = %s",
-                                (owner["member_id"],)).fetchone()["education_verified"]
-    audit.allow(request, target_type="match_list")
-    # can_match=false 이면 화면에서 "학력 증빙 승인 후 매칭할 수 있습니다" 안내
-    return {"can_match": verified, "items": items}
+
+    raise GateError(ErrorCode.INVALID_STATE, "use_paid_matching_api")
 
 
 class MatchIn(BaseModel):
     counterpart_member_id: uuid.UUID
 
 
-def _grant_match_consent(conn, giver, receiver) -> None:
-    """giver 가 receiver 에게 프로필 제공 동의 (이미 유효한 동의가 있으면 두지 않는다)."""
-    exists = conn.execute(
-        """SELECT 1 FROM consents WHERE member_id = %s AND counterpart_member_id = %s AND item = %s
-              AND purpose = %s AND revoked_at IS NULL AND expires_at > now()""",
-        (giver, receiver, MATCH_CONSENT_ITEM, MATCH_CONSENT_PURPOSE)).fetchone()
-    if exists is None:
-        conn.execute("""INSERT INTO consents (member_id, counterpart_member_id, item, purpose, expires_at)
-                        VALUES (%s, %s, %s, %s, now() + make_interval(days => %s))""",
-                     (giver, receiver, MATCH_CONSENT_ITEM, MATCH_CONSENT_PURPOSE, MATCH_CONSENT_DAYS))
-
-
 @router.post("/internal/my-matches", status_code=201)
 def create_match(body: MatchIn, request: Request, member: Principal = Depends(member_via_transfer)):
-    """매칭 누르기. 소개된 상대에게만. 상대도 이미 눌렀으면 성사 → 서로 프로필 제공 동의(30일) 생성. ※ 명세 외 추가"""
-    owner = _member_of(member.user_id)
-    me_id, other = owner["member_id"], body.counterpart_member_id
-    with db.connection() as conn:
-        verified = conn.execute("SELECT education_verified FROM members WHERE member_id = %s",
-                                (me_id,)).fetchone()["education_verified"]
-        if not verified:
-            raise GateError(ErrorCode.INVALID_STATE, "education_not_verified")   # 학력 증빙 통과 후 매칭 가능
-        ok = conn.execute(
-            """SELECT 1 FROM introductions i JOIN members cm ON cm.member_id = i.counterpart_member_id
-                WHERE i.member_id = %s AND i.counterpart_member_id = %s AND cm.status = 'active'""",
-            (me_id, other)).fetchone()
-        if ok is None:
-            raise GateError(ErrorCode.ACCESS_DENIED, "not_introduced")
-        conn.execute("""INSERT INTO matches (member_id, counterpart_member_id) VALUES (%s, %s)
-                        ON CONFLICT (member_id, counterpart_member_id)
-                        DO UPDATE SET created_at = now(), cancelled_at = NULL
-                        WHERE matches.cancelled_at IS NOT NULL""", (me_id, other))
-        theirs = conn.execute("""SELECT 1 FROM matches WHERE member_id = %s AND counterpart_member_id = %s
-                                    AND cancelled_at IS NULL""", (other, me_id)).fetchone()
-        matched = theirs is not None
-        if matched:
-            _grant_match_consent(conn, me_id, other)
-            _grant_match_consent(conn, other, me_id)
-            text = f"{notify.member_label(conn, me_id)} ↔ {notify.member_label(conn, other)} 매칭 성사 · 소개 자료 발송을 요청할 수 있습니다."
-            notify.to_counselors_of(conn, me_id, "match_made", "매칭 성사", text, "members")
-            notify.to_counselors_of(conn, other, "match_made", "매칭 성사", text, "members")
-    audit.allow(request, target_type="match", target_id=str(other))
-    return {"counterpart_member_id": str(other), "matched": matched}
+
+    raise GateError(ErrorCode.INVALID_STATE, "use_paid_matching_api")
 
 
 @router.post("/internal/my-matches/{counterpart_member_id}/cancel")
 def cancel_match(counterpart_member_id: uuid.UUID, request: Request,
                  member: Principal = Depends(member_via_transfer)):
-    """매칭 취소. 성사된 매칭이었다면 매칭으로 만든 양쪽 프로필 동의를 함께 철회한다. ※ 명세 외 추가"""
-    owner = _member_of(member.user_id)
-    me_id, other = owner["member_id"], counterpart_member_id
-    with db.connection() as conn:
-        row = conn.execute("""UPDATE matches SET cancelled_at = now()
-                               WHERE member_id = %s AND counterpart_member_id = %s AND cancelled_at IS NULL
-                               RETURNING 1""", (me_id, other)).fetchone()
-        if row is None:
-            raise GateError(ErrorCode.NOT_FOUND, "match_not_found")
-        revoked = conn.execute(
-            """UPDATE consents SET revoked_at = now()
-                WHERE revoked_at IS NULL AND item = %s AND purpose = %s
-                  AND ((member_id = %s AND counterpart_member_id = %s)
-                    OR (member_id = %s AND counterpart_member_id = %s))""",
-            (MATCH_CONSENT_ITEM, MATCH_CONSENT_PURPOSE, me_id, other, other, me_id)).rowcount
-    audit.allow(request, target_type="match", target_id=str(other))
-    return {"counterpart_member_id": str(other), "cancelled": True, "revoked_consents": revoked}
+
+    raise GateError(ErrorCode.INVALID_STATE, "use_paid_matching_api")
 
 
 # ======================================================================
-# 회원 본인 계정 상태·탈퇴 (외부 화면에서 로그인 직후 my-status 로 안내 문구를 정한다)
+
 # ======================================================================
 def _status_message(status: str, by_staff: bool, reason: str | None, when) -> str:
     day = when.astimezone(timezone(timedelta(hours=9))).strftime("%Y-%m-%d") if when else ""
@@ -828,12 +738,12 @@ def _status_message(status: str, by_staff: bool, reason: str | None, when) -> st
 
 @router.get("/internal/my-status")
 def my_status(request: Request, sub: str = Depends(member_token_via_transfer)):
-    """내 계정 상태. ※ 명세 외 추가
-    - active: 정상
-    - withdraw_pending: 탈퇴 유예 중 (by=self|staff, 직원 처리면 reason, withdraw_at). 회원 기능은 막혀 있다.
-    - withdrawn: 탈퇴 확정 (회원 정보 삭제됨). 안내 기간이 지나면 로그인 계정도 삭제된다.
-    - not_registered: 업무 DB 에 회원 정보가 없음
-    message 는 화면에 그대로 보여 줄 안내 문구."""
+
+
+
+
+
+
     with db.connection() as conn:
         m = conn.execute(
             """SELECT m.status, m.withdraw_at, m.withdraw_reason,
@@ -859,13 +769,13 @@ def my_status(request: Request, sub: str = Depends(member_token_via_transfer)):
 
 
 class MyWithdrawIn(BaseModel):
-    reason: str | None = Field(default=None, max_length=200)     # 직원 화면에만 보이는 탈퇴 사유 (선택)
+    reason: str | None = Field(default=None, max_length=200)
 
 
 @router.post("/internal/my-withdrawal")
 def my_withdraw(body: MyWithdrawIn, request: Request, member: Principal = Depends(member_via_transfer)):
-    """회원 본인 탈퇴 신청: 7일 유예 후 삭제. 유예 중에는 본인이 철회할 수 있다. ※ 명세 외 추가"""
-    owner = _member_of(member.user_id)          # 활성 회원만 (이미 유예 중이면 거부)
+
+    owner = _member_of(member.user_id)
     reason = (body.reason or "").strip() or None
     with db.connection() as conn:
         row = conn.execute(
@@ -885,7 +795,7 @@ def my_withdraw(body: MyWithdrawIn, request: Request, member: Principal = Depend
 
 @router.post("/internal/my-withdrawal/cancel")
 def my_withdraw_cancel(request: Request, member: Principal = Depends(member_via_transfer)):
-    """본인이 신청한 탈퇴만 철회할 수 있다 (직원이 처리한 탈퇴는 거부). ※ 명세 외 추가"""
+
     with db.connection() as conn:
         m = conn.execute(
             """SELECT member_id, pseudo_id, (withdraw_requested_by = user_id) AS by_self FROM members
@@ -905,11 +815,11 @@ def my_withdraw_cancel(request: Request, member: Principal = Depends(member_via_
 
 
 # ======================================================================
-# 직원 알림 (본인 알림만)
+
 # ======================================================================
 @router.get("/notifications")
 def list_notifications(request: Request, principal: Principal = Depends(require(*STAFF_ROLES))):
-    """내 알림 최근 100건과 읽지 않은 개수. ※ 명세 외 추가"""
+
     with db.connection() as conn:
         rows = conn.execute("""SELECT notification_id, kind, title, body, link_view, created_at, read_at
                                  FROM notifications WHERE user_id = %s ORDER BY created_at DESC LIMIT 100""",
@@ -936,7 +846,7 @@ def _unread(conn, user_id) -> int:
 def read_notifications(body: NotificationSelect, request: Request,
                        principal: Principal = Depends(require(*STAFF_ROLES)),
                        _csrf: None = Depends(require_csrf)):
-    """선택(ids) 또는 모두(all) 읽음 처리. 본인 알림만. ※ 명세 외 추가"""
+
     with db.connection() as conn:
         if body.all:
             n = conn.execute("UPDATE notifications SET read_at = now() WHERE user_id = %s AND read_at IS NULL",
@@ -953,7 +863,7 @@ def read_notifications(body: NotificationSelect, request: Request,
 def delete_notifications(body: NotificationSelect, request: Request,
                          principal: Principal = Depends(require(*STAFF_ROLES)),
                          _csrf: None = Depends(require_csrf)):
-    """선택(ids) 또는 모두(all) 삭제. 본인 알림만. ※ 명세 외 추가"""
+
     with db.connection() as conn:
         if body.all:
             n = conn.execute("DELETE FROM notifications WHERE user_id = %s", (principal.user_id,)).rowcount
