@@ -18,7 +18,7 @@ from privacygate.web import role_guard, service_guard
 
 from .. import db
 from ..config import SESSION_COOKIE, get_settings
-from .oidc import service_verifier
+from .oidc import service_verifier, staff_relay_verifier
 
 
 def current_principal(request: Request) -> Principal:
@@ -115,7 +115,7 @@ def staff_via_transfer(request: Request, _svc: dict = Depends(_from_transfer)) -
     token = request.headers.get(USER_TOKEN_HEADER, '')
     if not token:
         raise GateError(ErrorCode.AUTH_REQUIRED, 'staff_token_missing')
-    claims = service_verifier().verify(token)
+    claims = staff_relay_verifier().verify(token)
     if claims.get('azp') != 'internal-web' or role_from_claims(claims) != Role.COUNSELOR.value:
         raise GateError(ErrorCode.ACCESS_DENIED, 'not_counselor_token')
     with db.connection() as conn:

@@ -42,21 +42,27 @@ class Connection:
         self.sql.executescript("""
         CREATE TABLE users(user_id TEXT,pseudo_id TEXT,role TEXT,active INT);
         CREATE TABLE members(member_id TEXT,user_id TEXT,status TEXT,pseudo_id TEXT,name TEXT,birth_date TEXT,
-            education_level TEXT,education_verified INT,employment_verified INT,job_group TEXT);
+            education_level TEXT,education_verified INT,employment_verified INT,job_group TEXT,
+            contact_phone TEXT,contact_email TEXT);
         CREATE TABLE introductions(member_id TEXT,counterpart_member_id TEXT);
         CREATE TABLE assignments(user_id TEXT,member_id TEXT);
         CREATE TABLE evidence_files(file_id TEXT,member_id TEXT,kind TEXT);
         CREATE TABLE evidence_reviews(file_id TEXT,result TEXT,created_at TEXT);
+        CREATE TABLE evidence_results(file_id TEXT,member_id TEXT,kind TEXT,summary TEXT,masked_key TEXT,masked_hash TEXT,masked_type TEXT);
         CREATE TABLE consents(consent_id TEXT,member_id TEXT,counterpart_member_id TEXT,item TEXT,purpose TEXT,expires_at TEXT,revoked_at TEXT);
         """)
         self.sql.executemany('INSERT INTO users VALUES (?,?,?,1)',[(B,'A-003','member'),(C,'A-001','member'),(A,'A-C01','counselor')])
         for mid,who in ((M,B),(N,C)):
-            self.sql.execute('INSERT INTO members VALUES (?,?,?,?,?,?,?,?,?,?)',
-                (mid,who,'active','ADMIN-ONLY-CODE','SECRET-NAME','1995-01-01','4년제 대졸',1,1,'연구'))
+            self.sql.execute('INSERT INTO members VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+                (mid,who,'active','ADMIN-ONLY-CODE','SECRET-NAME','1995-01-01','4년제 대졸',1,1,'연구','010-0000-0000','secret@example.test'))
         self.sql.executemany('INSERT INTO introductions VALUES (?,?)',[(M,N),(N,M)])
         self.sql.execute('INSERT INTO assignments VALUES (?,?)',(A,M))
         self.sql.execute('INSERT INTO evidence_files VALUES (?,?,?)',('education-file',N,'education'))
         self.sql.execute('INSERT INTO evidence_reviews VALUES (?,?,?)',('education-file','passed',datetime.now(timezone.utc).isoformat()))
+        # 필수 증빙: 신분증(본인 확인) 통과 (두 회원 모두)
+        for mid in (M,N):
+            self.sql.execute('INSERT INTO evidence_files VALUES (?,?,?)',('identity-'+mid[-4:],mid,'identity'))
+            self.sql.execute('INSERT INTO evidence_reviews VALUES (?,?,?)',('identity-'+mid[-4:],'passed','2026-01-01T00:00:00+00:00'))
     def execute(self,sql,params=()):
         params=list(params)
         if 'ANY(%s::uuid[])' in sql:
@@ -80,6 +86,7 @@ def client(tmp_path,monkeypatch):
             sub,azp,roles=entries[token]
             return {'sub':sub,'azp':azp,'realm_access':{'roles':roles}}
     monkeypatch.setattr(session,'service_verifier',lambda:Verifier())
+    monkeypatch.setattr(session,'staff_relay_verifier',lambda:Verifier())
     # service_guard captured the original verifier factory at import time.
     # Replace its issuer/JWKS provider, retaining the actual service guard logic.
     from app.auth import oidc
@@ -123,7 +130,7 @@ def test_matching_release_rejects_invalid_business_context(client,fault):
     if fault=='staff_inactive':conn.execute('UPDATE users SET active=0 WHERE user_id=%s',(A,))
     if fault=='peer_inactive':conn.execute("UPDATE members SET status='withdraw_pending' WHERE member_id=%s",(N,))
     if fault=='unintroduced':conn.execute('DELETE FROM introductions')
-    if fault=='unsupported':body['scopes']=['contact']
+    if fault=='unsupported':body['scopes']=['bank_account']      # 정의되지 않은 공개 범위
     assert tc.post('/api/internal/matching-release-checks',headers=headers(),json=body).status_code in (403,422)
 
 
@@ -316,3 +323,106 @@ def test_newer_rejection_does_not_reuse_older_passed_result(client):
     r=tc.post('/api/internal/matching-disclosures',headers=headers(),json=disclosure_body())
     assert r.status_code==200,r.text
     assert r.json()['fields']==[]
+
+
+# ---- 증빙 확장: 소득·혼인·부동산 텍스트, 사진·문서 사본·연락처 (승인 자료 전용) ----
+PNG=b'\x89PNG\r\n\x1a\n'+b'masked-copy'
+
+
+def passed(conn,member,kind,summary,masked=True,file_id=None):
+    import hashlib
+    fid=file_id or f'{kind}-{member[-4:]}'
+    conn.execute('INSERT INTO evidence_files VALUES (%s,%s,%s)',(fid,member,kind))
+    conn.execute('INSERT INTO evidence_reviews VALUES (%s,%s,%s)',(fid,'passed',datetime.now(timezone.utc).isoformat()))
+    conn.execute('INSERT INTO evidence_results VALUES (%s,%s,%s,%s,%s,%s,%s)',
+                 (fid,member,kind,summary,f'results/{fid}' if masked else None,
+                  hashlib.sha256(PNG).hexdigest() if masked else None,'image/png' if masked else None))
+
+
+@pytest.fixture
+def stored(monkeypatch):
+    from app import storage
+    blobs={}
+    monkeypatch.setattr(storage,'get',lambda key:blobs.get(key,PNG))
+    return blobs
+
+
+def test_disclosure_shows_reviewed_income_but_never_release_only_scopes(client,stored):
+    tc,conn,_=client
+    passed(conn,N,'income','연소득 구간: 5천만~7천만원 (소득 증빙 확인)')
+    passed(conn,N,'photo','프로필 사진 검토 완료')
+    body={**disclosure_body(),'scopes':['income','photo','contact','documents']}
+    r=tc.post('/api/internal/matching-disclosures',headers=headers(),json=body)
+    assert r.status_code==200,r.text
+    assert [f['scope'] for f in r.json()['fields']]==['income']
+    assert 'attachments' not in r.text and '010-' not in r.text
+
+
+def test_release_documents_only_for_selected_reviewed_kinds(client,stored):
+    tc,conn,_=client
+    passed(conn,M,'education','학력 증빙 검토 완료')
+    passed(conn,M,'income','연소득 구간: 5천만~7천만원 (소득 증빙 확인)')
+    passed(conn,M,'property','부동산: 보유 (서울특별시)')
+    body={**release_body(),'scopes':['income','documents']}
+    r=tc.post('/api/internal/matching-release-checks',headers=headers(),json=body)
+    assert r.status_code==200,r.text
+    docs=[f for f in r.json()['fields'] if f['scope']=='documents'][0]
+    assert [a['name'] for a in docs['attachments']]==['income-masked.png']            # 부동산 사본은 선택 안 됨
+    assert tc.post('/api/internal/matching-release-checks',headers=headers(),
+                   json={**release_body(),'scopes':['documents']}).status_code==409    # 함께 선택한 서류 없음
+
+
+def test_tampered_masked_copy_is_not_released(client,stored):
+    tc,conn,_=client
+    passed(conn,M,'education','학력 증빙 검토 완료')
+    passed(conn,M,'photo','프로필 사진 검토 완료')
+    stored['results/photo-0003']=PNG+b'tampered'
+    r=tc.post('/api/internal/matching-release-checks',headers=headers(),json={**release_body(),'scopes':['photo']})
+    assert r.status_code==403 and 'APPROVAL_MISMATCH' in r.text
+
+
+def test_contact_requires_identity_review(client,stored):
+    tc,conn,_=client
+    passed(conn,M,'education','학력 증빙 검토 완료')
+    body={**release_body(),'scopes':['contact']}
+    conn.execute("UPDATE evidence_reviews SET result='rejected' WHERE file_id=%s",('identity-0003',))  # 본인 확인 반려
+    assert tc.post('/api/internal/matching-release-checks',headers=headers(),json=body).status_code in (403,409)
+    conn.execute("UPDATE evidence_reviews SET result='passed' WHERE file_id=%s",('identity-0003',))
+    r=tc.post('/api/internal/matching-release-checks',headers=headers(),json=body)
+    assert r.status_code==200 and '010-0000-0000' in r.json()['fields'][0]['value']
+
+
+
+def test_identity_review_is_required_for_matching(client):
+    tc,conn,_=client
+    conn.execute("UPDATE evidence_reviews SET result='rejected' WHERE file_id=%s",('identity-0001',))   # 상대(N) 신분증 반려
+    r=tc.post('/api/internal/matching-disclosures',headers=headers(),json=disclosure_body())
+    assert r.status_code==403
+    d=tc.post('/api/internal/matching-directory',headers=headers(),json={})
+    assert d.status_code==200 and d.json()['self']['eligible'] is True
+    assert [i['eligible'] for i in d.json()['items']]==[False]
+
+
+def test_name_and_contact_follow_their_own_conditions(client):
+    tc,_,_=client
+    body=disclosure_body();body['scopes']=['name','profile','contact']
+    r=tc.post('/api/internal/matching-disclosures',headers=headers(),json=body)
+    assert r.status_code==200,r.text
+    fields={f['scope']:f['value'] for f in r.json()['fields']}
+    assert fields['profile'].startswith('SECRET-NAME') and '소개 상대' not in fields['profile']   # 이름 공개 → 소개 상대 대신 실명
+    assert 'contact' not in fields                                                             # 중계 조건 미확인
+    body['contact_ready']=True;body['scopes']=['name','contact']
+    fields={f['scope']:f['value'] for f in tc.post('/api/internal/matching-disclosures',headers=headers(),json=body).json()['fields']}
+    assert fields['name']=='SECRET-NAME' and '010-0000-0000' in fields['contact']
+
+
+def test_release_name_replaces_label_only_when_name_scope_is_approved(client):
+    tc,conn,_=client
+    conn.execute('INSERT INTO evidence_files VALUES (%s,%s,%s)',('owner-education',M,'education'))
+    conn.execute('INSERT INTO evidence_reviews VALUES (%s,%s,%s)',('owner-education','passed',datetime.now(timezone.utc).isoformat()))
+    body=release_body();body['scopes']=['profile']
+    fields={f['scope']:f['value'] for f in tc.post('/api/internal/matching-release-checks',headers=headers(),json=body).json()['fields']}
+    assert fields['profile'].startswith('소개 상대') and 'SECRET-NAME' not in fields['profile']
+    body['scopes']=['name','profile']
+    fields={f['scope']:f['value'] for f in tc.post('/api/internal/matching-release-checks',headers=headers(),json=body).json()['fields']}
+    assert fields['name']=='SECRET-NAME' and fields['profile'].startswith('SECRET-NAME')

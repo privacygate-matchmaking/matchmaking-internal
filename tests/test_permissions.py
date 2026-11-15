@@ -222,7 +222,7 @@ class Permissions(unittest.TestCase):
                 s = c.get("/api/internal/my-status").json()
                 self.assertEqual((s["status"], s["by"], s["can_cancel"]), ("withdraw_pending", "self", True))
                 self.assertIsNone(s["reason"])               # 본인 신청이면 사유를 다시 보여 주지 않음
-                self.assertEqual(c.get("/api/internal/my-matches").status_code, 403)   # 유예 중 회원 기능 막힘
+                self.assertEqual(c.get("/api/internal/my-consents").status_code, 403)  # 유예 중 회원 기능 막힘
             finally:
                 self.assertEqual(c.post("/api/internal/my-withdrawal/cancel").status_code, 200)
         self.assertEqual(self.status_of(target), "active")
@@ -243,6 +243,28 @@ class Permissions(unittest.TestCase):
             with self.as_staff(COUNSELOR_A) as c:
                 self.assertEqual(c.post(f"/api/members/{target}/withdraw/cancel").status_code, 200)
         self.assertEqual(self.status_of(target), "active")
+
+    def test_member_profile_self_service(self):
+        with self.db.connection() as conn:
+            orig = conn.execute("SELECT height_cm, weight_kg, contact_phone, contact_email FROM members WHERE member_id = %s",
+                                (member(3),)).fetchone()
+        try:
+            with self.as_member(MEMBER_B) as c:
+                p = c.get("/api/internal/my-profile").json()
+                if orig["contact_phone"]:
+                    self.assertNotEqual(p["contact_phone"], orig["contact_phone"])   # 가린 값만
+                    self.assertIn("*", p["contact_phone"])
+                r = c.patch("/api/internal/my-profile", json={"height_cm": 181, "contact_phone": "01098765432"})
+                self.assertEqual(r.status_code, 200, r.text)
+                self.assertEqual(r.json()["height_cm"], 181)
+                self.assertEqual(r.json()["contact_phone"], "010-****-5432")
+                self.assertEqual(c.patch("/api/internal/my-profile", json={"contact_phone": "12345"}).status_code, 422)
+                self.assertEqual(c.patch("/api/internal/my-profile", json={"height_cm": 300}).status_code, 422)
+                self.assertEqual(c.patch("/api/internal/my-profile", json={}).status_code, 422)
+        finally:
+            with self.db.connection() as conn:     # app_user 권한으로 원래 값 복원
+                conn.execute("UPDATE members SET height_cm = %s, weight_kg = %s, contact_phone = %s, contact_email = %s WHERE member_id = %s",
+                             (orig["height_cm"], orig["weight_kg"], orig["contact_phone"], orig["contact_email"], member(3)))
 
     def test_unknown_member_status(self):
         with self.as_member(str(uuid.uuid4())) as c:

@@ -218,8 +218,15 @@ dialog.confirm textarea:focus{outline:0;border-color:var(--blue);box-shadow:0 0 
 .notif-empty{padding:36px 16px;text-align:center;font-size:12px;color:var(--muted)}
 
 
-#meeting-panel select { max-width: 100%; padding: 10px; margin: 12px 0; }
-#meeting-panel .meeting-card, #meeting-panel fieldset { border: 1px solid #d8e0df; padding: 16px; margin: 12px 0; }
-#meeting-panel fieldset input { display: block; width: 100%; margin: 8px 0; }
-#meeting-panel .matching-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-#meeting-panel button { cursor: pointer; padding: 8px 14px; margin: 4px; }
+.meeting-card{border:1px solid #d8e0df;border-radius:4px;padding:14px 16px;margin:10px 0;font-size:12.5px;line-height:1.8}
+.meeting-card p{margin:2px 0}
+.matching-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px}
+.check-row{display:flex;flex-wrap:wrap;gap:8px 18px;margin:8px 0 12px;font-size:12.5px}
+.check-row label{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.check-row input{width:auto;margin:0}
+.review-panel h3{margin:0}.review-panel h4{font-size:12.5px;margin:16px 0 6px;color:var(--navy,#13284d)}
+.inspect-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}@media(max-width:900px){.inspect-grid{grid-template-columns:1fr}}
+.checks{list-style:none;padding:0;margin:8px 0;font-size:12.5px;line-height:1.9}.checks .ok{color:var(--green)}.checks .bad{color:var(--red)}
+.facts{display:grid;grid-template-columns:110px 1fr;gap:4px 10px;font-size:12.5px;margin:6px 0}.facts dt{color:#6b7790}.facts dd{margin:0;font-weight:600}
+.masked-preview{display:block;width:100%;max-width:420px;border:1px solid var(--border);border-radius:3px;background:#fff}
+.review-form{margin-top:18px;border-top:1px solid var(--border);padding-top:14px}.review-form select{display:block;margin-top:6px;padding:7px 9px;min-width:220px}

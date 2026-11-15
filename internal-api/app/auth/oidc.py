@@ -16,7 +16,7 @@ from ..config import get_settings
 
 _TTL = 3600
 _lock = threading.Lock()
-_cache: dict = {"at": 0.0, "doc": None, "jwks": None, "svc": None}
+_cache: dict = {"at": 0.0, "doc": None, "jwks": None, "svc": None, "relay": None}
 
 
 class OIDCError(Exception):
@@ -30,7 +30,8 @@ def discovery() -> dict:
             resp.raise_for_status()
             doc = resp.json()
             _cache.update(at=time.time(), doc=doc, jwks=jwt.PyJWKClient(doc["jwks_uri"], cache_keys=True),
-                          svc=ServiceTokenVerifier(doc["jwks_uri"], doc["issuer"], get_settings().api_audience))
+                          svc=ServiceTokenVerifier(doc["jwks_uri"], doc["issuer"], get_settings().api_audience),
+                          relay=ServiceTokenVerifier(doc["jwks_uri"], doc["issuer"], "transfer-api"))
         return _cache["doc"]
 
 
@@ -38,6 +39,14 @@ def service_verifier() -> ServiceTokenVerifier:
     """서버 간 API(/api/internal/*) 의 서비스 토큰 검증기."""
     discovery()
     return _cache["svc"]
+
+
+def staff_relay_verifier() -> ServiceTokenVerifier:
+    """중계(transfer-api)가 X-User-Token 으로 넘긴 직원 토큰 검증기.
+    internal-web 토큰의 aud 는 transfer-api 이므로 그 값으로 서명·iss·exp 를 확인한다.
+    호출자가 transfer-api 인지는 Authorization 서비스 토큰으로 따로 확인한다."""
+    discovery()
+    return _cache["relay"]
 
 
 def authorization_url(state: str, nonce: str, code_challenge: str) -> str:

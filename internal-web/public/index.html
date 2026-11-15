@@ -78,9 +78,9 @@
         <button type="button" class="tab" data-view="meetings" data-roles="counselor">매칭·동의·일정</button>
       </nav>
 
-      <section class="view" data-view="meetings" data-title="만남 일정 관리" hidden>
-        <div class="page-heading"><div><span class="eyebrow">MEETING SCHEDULE</span><h1>만남 일정 관리</h1><p class="muted">담당 회원의 성사 매칭에 최대 3개 후보를 제안하고, 양쪽 동의 후 확정합니다. 연락처는 자동 전달하지 않습니다.</p></div></div>
-        <p id="meeting-message" role="status"></p><div id="matching-overview-panel"></div><div id="meeting-panel" class="card"></div>
+      <section class="view" data-view="meetings" data-title="매칭·동의·일정" hidden>
+        <div class="page-heading"><div><span class="eyebrow">MATCHING · CONSENT · MEETING</span><h1>매칭·동의·일정</h1><p class="muted">담당 회원의 매칭 목록입니다. '상세'를 누르면 공개 동의·자료 발송과 만남 일정을 봅니다. 일정은 두 회원이 직접 합의하고, 담당 직원은 합의된 일정을 승인만 합니다. 연락처는 자동 전달하지 않습니다.</p></div></div>
+        <div id="matching-overview-panel"></div>
       </section>
 
       <section class="view" data-view="members" data-title="담당 회원 조회" hidden>
@@ -99,7 +99,7 @@
             <div class="row-between"><h2 id="member-detail-title"></h2><span id="member-detail-status"></span></div>
             <dl class="facts" id="member-facts"></dl>
             <h3 class="sub-h">유료 매칭·일정</h3><div id="member-matching-panel"></div>
-            <p class="muted">회원의 유료 신청과 상대 수락으로 성사됩니다. 공개 동의는 별도이며 자동 생성하지 않습니다. 담당 상담 직원은 매칭·동의·일정 탭에서 일정을 제안·확정합니다.</p>
+            <p class="muted">회원의 유료 신청과 상대 수락으로 성사됩니다. 공개 동의는 별도이며 자동 생성하지 않습니다. 일정은 두 회원이 직접 합의하고, 담당 상담 직원은 매칭·동의·일정 탭에서 승인합니다.</p>
             <h3 class="sub-h">제공 동의</h3>
             <div class="tablewrap">
               <table>
@@ -188,7 +188,7 @@
 
 
       <section class="view" data-view="evidence" data-title="회원·서류 심사" hidden>
-        <div class="page-heading"><div><span class="eyebrow">DOCUMENT REVIEW</span><h1>회원 · 서류 조회 · 심사 · 승인</h1><p class="muted">회원이 제출한 학력(졸업증명서)·재직(재직증명서) 서류를 열람하고 통과(승인) 또는 반려합니다. 학력이 통과되어야 회원이 매칭할 수 있고, 재직이 통과되면 소개 자료에 직장이 함께 나갑니다.</p></div></div>
+        <div class="page-heading"><div><span class="eyebrow">DOCUMENT REVIEW</span><h1>회원 · 서류 조회 · 심사 · 승인</h1><p class="muted">회원이 제출한 학력·재직·신분증·혼인관계·소득·부동산 서류와 프로필 사진을 자동 검사 결과(로컬 OCR·개인정보 탐지·발급대장 대조·마스킹 사본)와 함께 확인하고 통과 또는 반려합니다. 다른 회원에게는 통과한 서류의 요약(구간·여부)과 마스킹 사본만, 회원 동의와 승인을 거쳐 전달됩니다.</p></div></div>
         <div class="content-layout"><div class="work">
           <div class="section-title"><h2>제출 서류</h2>
             <div class="filters" id="evidence-filters">
@@ -199,13 +199,14 @@
           </div>
           <div class="tablewrap">
             <table>
-              <thead><tr><th>서류 ID</th><th>회원</th><th>이름</th><th>종류</th><th>접수</th><th>상태</th><th>심사자</th><th>삭제 기한</th><th>관리</th></tr></thead>
+              <thead><tr><th>파일 이름</th><th>회원</th><th>이름</th><th>종류</th><th>접수</th><th>자동 검사</th><th>상태</th><th>심사자</th><th>삭제 기한</th><th>관리</th></tr></thead>
               <tbody id="reviews-body"></tbody>
             </table>
             <div class="empty" id="reviews-empty" hidden>서류가 없습니다.</div>
           </div>
           <p id="reviews-result" class="result" hidden></p>
-        </div><aside class="guide"><span class="eyebrow">STAFF GUIDE</span><h2>서류 심사</h2><ol><li><p>심사 중인 서류만 열람할 수 있고, 처음 연 직원이 심사자로 기록됩니다.</p></li><li><p>열람한 서류를 저장하거나 외부로 옮기지 마세요.</p></li><li><p>원본은 심사 후 7일, 미심사 30일이 지나면 자동 삭제됩니다.</p></li><li><p>모든 조회·변경은 추적번호와 함께 감사 로그에 기록됩니다.</p></li></ol></aside></div>
+          <div id="review-panel" class="card mt16 review-panel" hidden></div>
+        </div><aside class="guide"><span class="eyebrow">STAFF GUIDE</span><h2>서류 심사</h2><ol><li><p>심사 중인 서류만 열람할 수 있고, 처음 연 직원이 심사자로 기록됩니다.</p></li><li><p>열람한 서류를 저장하거나 외부로 옮기지 마세요.</p></li><li><p>원본은 심사 후 7일, 미심사 30일이 지나면 자동 삭제됩니다. 자동 검사 추출 값도 함께 지워지고, 통과 결과의 요약과 마스킹 사본만 남습니다.</p></li><li><p>자동 검사는 참고용입니다. 진위 "의심"이면 원본을 직접 확인하고, 공개 사실(구간·여부)은 직원이 최종 확정합니다.</p></li><li><p>신분증은 본인 확인용이며 사본을 만들지 않고 다른 회원에게 절대 제공되지 않습니다.</p></li><li><p>모든 조회·변경은 추적번호와 함께 감사 로그에 기록됩니다.</p></li></ol></aside></div>
       </section>
 
 
@@ -222,7 +223,7 @@
           </div>
           <div class="tablewrap">
             <table>
-              <thead><tr><th>소개 자료</th><th>신청 직원</th><th>받는 회원</th><th>목적</th><th>상태</th><th>제공 기한</th><th>관리</th></tr></thead>
+              <thead><tr><th>자료 (주인 → 받는 회원)</th><th>신청 직원</th><th>받는 회원</th><th>목적</th><th>상태</th><th>제공 기한</th><th>관리</th></tr></thead>
               <tbody id="approvals-body"></tbody>
             </table>
             <div class="empty" id="approvals-empty" hidden>신청 내역이 없습니다.</div>

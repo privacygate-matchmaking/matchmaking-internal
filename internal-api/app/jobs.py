@@ -1,4 +1,4 @@
-"""주기 작업: 증빙 원본 기한 삭제, 탈퇴 유예가 끝난 회원 삭제, 안내 기간이 끝난 회원 Keycloak 계정 삭제.
+"""주기 작업: 증빙 자동 검사(doc-inspector), 증빙 원본 기한 삭제, 탈퇴 유예가 끝난 회원 삭제, 안내 기간이 끝난 회원 Keycloak 계정 삭제.
 
 삭제 기한이 지난 증빙(법적 보존 legal_hold 제외)의 원본을 evidence-storage 에서 지우고 상태를 deleted 로 바꾼다.
 성공·실패 모두 감사 로그에 action=evidence_delete 로 남긴다 (실패는 Wazuh 경보 대상).
@@ -7,7 +7,7 @@ import logging
 import threading
 import uuid
 
-from . import audit, db, keycloak_admin, notify, storage
+from . import audit, db, inspection, keycloak_admin, notify, storage
 from .config import get_settings
 
 _log = logging.getLogger("internal-api.jobs")
@@ -28,6 +28,7 @@ def purge_expired_evidence() -> int:
             with db.connection() as conn:
                 conn.execute("UPDATE evidence_files SET status = 'deleted', storage_key = NULL WHERE file_id = %s",
                              (row["file_id"],))
+                inspection.drop_for_file(conn, row["file_id"])   # 추출 값·검사용 사본도 함께 (심사 결과 사본은 유지)
             audit.writer().record(trace_id=trace, action="evidence_delete", result="allow", actor="system",
                                   target_type="evidence", target_id=str(row["file_id"]))
             done += 1
@@ -138,10 +139,20 @@ def _loop() -> None:
             _log.exception("탈퇴 회원 Keycloak 계정 삭제 작업 오류")
 
 
+def _inspect_loop() -> None:
+    interval = get_settings().inspection_seconds
+    while not _stop.wait(interval):
+        try:
+            inspection.pending()
+        except Exception:
+            _log.exception("증빙 자동 검사 작업 오류")
+
+
 def start() -> threading.Thread:
     _stop.clear()
     t = threading.Thread(target=_loop, name="evidence-purge", daemon=True)
     t.start()
+    threading.Thread(target=_inspect_loop, name="evidence-inspect", daemon=True).start()
     return t
 
 
