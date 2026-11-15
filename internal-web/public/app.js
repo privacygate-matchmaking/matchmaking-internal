@@ -451,6 +451,23 @@ async function loadReviews() {
   renderReviews();
 }
 
+const KIND_KO = { education: "학력", employment: "재직", identity: "신분증", marital: "혼인관계", income: "소득",
+                  property: "부동산", photo: "프로필 사진" };
+const VERDICT = { verified: ["진위 확인", "green"], suspicious: ["진위 의심", "red"], unchecked: ["미확인", "amber"] };
+const CHECK_KO = { issue_format: "발급번호 형식", issue_checksum: "발급번호 검증숫자", registry_found: "발급대장에 있음",
+                   registry_kind: "문서 종류 일치", name_match: "성명 일치", birth_match: "생년월일 일치",
+                   registry_revoked: "폐기 문서 아님", metadata_removed: "사진 메타데이터(위치 등) 제거" };
+const PII_KO = { resident_number: "주민등록번호", phone: "전화번호", email: "이메일", account_number: "계좌번호",
+                 address: "주소", name: "이름" };
+const FIELD_KO = { name: "성명", birth: "생년월일", issue_no: "발급번호", amount: "금액(원)", degree: "학위", employed: "재직 표시" };
+
+function verdictPill(e) {
+  if (!e.inspection) return el("span", "검사 대기", "pill off");
+  if (e.inspection === "failed") return el("span", "검사 실패", "pill amber");
+  const [label, color] = VERDICT[e.verdict] || [e.verdict, ""];
+  return el("span", label, `pill ${color}`);
+}
+
 function renderReviews() {
   const want = state.evFilter ? state.evFilter.split(",") : null;
   const items = state.evidence.filter((e) => !want || want.includes(e.status));
@@ -459,13 +476,104 @@ function renderReviews() {
     const status = e.status === "reviewed" && e.review_result
       ? el("span", e.review_result === "passed" ? "통과" : "반려", `pill ${e.review_result === "passed" ? "green" : "red"}`)
       : pill(e.status);
-    return row([mono(short(e.file_id)), memberCell({ pseudo_id: e.member_pseudo_id }),
-      e.member_name ?? "-", e.kind === "employment" ? "재직" : "학력", toKst(e.created_at), status, e.reviewer || "-",
+    if (e.result_summary) status.title = e.result_summary;
+    const fname = el("span", e.file_name || short(e.file_id), "mono");
+    fname.title = `서류 ID ${e.file_id}`;
+    return row([fname, memberCell({ pseudo_id: e.member_pseudo_id }),
+      e.member_name ?? "-", KIND_KO[e.kind] || e.kind, toKst(e.created_at), verdictPill(e), status, e.reviewer || "-",
       toKst(e.delete_after) + (e.legal_hold ? " (보존)" : ""),
-      open ? actions(button("열람", () => openEvidence(e.file_id)),
-                     button("통과", () => review(e.file_id, "passed")),
-                     button("반려", () => review(e.file_id, "rejected"), "btn sm danger")) : "-"]);
+      open ? actions(button("검사·심사", () => openReviewPanel(e)), button("원본", () => openEvidence(e.file_id)))
+           : (e.review_result === "passed" ? actions(button("결과", () => openReviewPanel(e))) : "-")]);
   }));
+}
+
+function selectField(label, options, value) {
+  const wrap = el("label", label, "confirm-input");
+  const sel = document.createElement("select");
+  sel.append(el("option", "선택", ""));
+  sel.firstChild.value = "";
+  for (const o of options) { const opt = el("option", o); opt.value = o; if (o === value) opt.selected = true; sel.append(opt); }
+  wrap.append(sel);
+  return [wrap, sel];
+}
+
+async function openReviewPanel(e) {
+  const panel = $("review-panel");
+  panel.hidden = false;
+  panel.replaceChildren(el("p", "자동 검사 결과를 불러오는 중입니다…", "muted"));
+  panel.scrollIntoView({ behavior: "smooth", block: "start" });
+  let x;
+  try { x = await getJson(`/api/evidence-files/${e.file_id}/inspection`); }
+  catch (err) { panel.replaceChildren(el("p", err.message, "result err")); return; }
+  const open = ["submitted", "in_review"].includes(e.status);
+  const head = el("div", null, "section-title");
+  head.append(el("h3", `${x.file_name || e.file_name || ""} · ${KIND_KO[e.kind] || e.kind}`),
+              actions(...[open ? button("원본 열람", () => openEvidence(e.file_id)) : null,
+                          open ? button("자동 검사 다시 실행", async () => {
+                            const r = await api(`/api/evidence-files/${e.file_id}/inspect`, { method: "POST" });
+                            if (!r.ok) return showResult($("reviews-result"), await describe(r), false);
+                            await loadReviews(); openReviewPanel(state.evidence.find((v) => v.file_id === e.file_id) || e);
+                          }) : null,
+                          button("닫기", () => { panel.hidden = true; })].filter(Boolean)));
+  panel.replaceChildren(head);
+  if (x.status === "pending") {
+    panel.append(el("p", "자동 검사 대기 중입니다 (보통 수십 초 안에 끝납니다). 잠시 후 다시 열거나 '자동 검사 다시 실행'을 누르세요.", "muted"));
+  } else if (x.status === "failed") {
+    panel.append(el("p", `자동 검사 실패: ${x.error || "-"} · 원본을 직접 확인해 심사하세요.`, "result err"));
+  } else {
+    const [vl, vc] = VERDICT[x.verdict] || [x.verdict, ""];
+    const info = el("div", null, "inspect-grid");
+    const left = el("div");
+    left.append(el("h4", "진위 판단 (합성 발급대장 대조)"), el("span", vl, `pill ${vc}`));
+    const ul = el("ul", null, "checks");
+    for (const [k, v] of Object.entries(x.checks || {})) {
+      const bad = k === "registry_revoked" ? v : !v;
+      ul.append(el("li", `${bad ? "✗" : "✓"} ${CHECK_KO[k] || k}`, bad ? "bad" : "ok"));
+    }
+    left.append(ul, el("h4", "탐지·가림 처리한 개인정보"));
+    const det = Object.entries(x.detected || {});
+    left.append(el("p", det.length ? det.map(([k, n]) => `${PII_KO[k] || k} ${n}건`).join(" · ") : "탐지된 항목 없음", "muted"));
+    left.append(el("h4", "읽어 낸 값 (직원 확인용 · 다른 회원에게 제공 안 함)"));
+    const dl = el("dl", null, "facts");
+    for (const [k, v] of Object.entries(x.fields || {})) {
+      if (v === null || v === undefined || v === "") continue;
+      dl.append(el("dt", FIELD_KO[k] || k), el("dd", k === "amount" ? Number(v).toLocaleString("ko-KR") : String(v)));
+    }
+    left.append(dl, el("p", `검사 ${toKst(x.inspected_at)} · ${x.version}`, "muted"));
+    const right = el("div");
+    right.append(el("h4", e.kind === "photo" ? "검토용 사진 (메타데이터 제거본)" : "마스킹 사본 미리보기"));
+    if (x.has_masked) {
+      const img = document.createElement("img");
+      img.className = "masked-preview";
+      img.alt = "마스킹 사본";
+      const r = await api(`/api/evidence-files/${e.file_id}/masked`);
+      if (r.ok) { img.src = URL.createObjectURL(await r.blob()); img.onload = () => setTimeout(() => URL.revokeObjectURL(img.src), 1000); right.append(img); }
+    } else right.append(el("p", e.kind === "identity" ? "신분증은 사본을 만들지 않습니다." : "사본 없음", "muted"));
+    info.append(left, right);
+    panel.append(info);
+  }
+  if (!open) return;
+  const opt = x.options || {};
+  const proposed = x.proposed || {};
+  const form = el("div", null, "review-form");
+  let collect = () => ({});
+  if (e.kind === "marital") {
+    const [w, sel] = selectField("공개할 혼인관계", opt.marital || [], proposed.status);
+    form.append(w); collect = () => ({ status: sel.value });
+  } else if (e.kind === "income") {
+    const [w, sel] = selectField("공개할 연소득 구간", opt.income_bands || [], proposed.band);
+    form.append(w); collect = () => ({ band: sel.value });
+  } else if (e.kind === "property") {
+    const [w1, owns] = selectField("부동산 보유", ["보유", "보유 내역 없음"], proposed.owns === true ? "보유" : proposed.owns === false ? "보유 내역 없음" : "");
+    const [w2, region] = selectField("소재 시·도 (보유 시)", opt.regions || [], proposed.region);
+    form.append(w1, w2); collect = () => (owns.value === "보유" ? { owns: true, region: region.value } : owns.value ? { owns: false } : {});
+  }
+  form.append(el("p", e.kind === "identity" ? "통과하면 '본인 확인 완료'로만 기록됩니다." :
+    "통과하면 위 공개 사실(구간·여부)로 요약이 만들어지고, 마스킹 사본이 결과로 보관됩니다.", "muted"));
+  form.append(actions(
+    button("통과", () => review(e.file_id, "passed", collect()), "btn sm primary"),
+    button("반려", () => review(e.file_id, "rejected"), "btn sm danger")));
+  panel.append(form);
 }
 
 async function openEvidence(id) {
@@ -481,9 +589,10 @@ async function openEvidence(id) {
   loadReviews();
 }
 
-async function review(id, result) {
-  const res = await api(`/api/evidence-files/${id}/review`, { method: "POST", json: { result } });
+async function review(id, result, facts) {
+  const res = await api(`/api/evidence-files/${id}/review`, { method: "POST", json: facts ? { result, facts } : { result } });
   showResult($("reviews-result"), res.ok ? `심사 완료 (${result === "passed" ? "통과" : "반려"})` : await describe(res), res.ok);
+  if (res.ok) $("review-panel").hidden = true;
   loadReviews();
 }
 
@@ -501,12 +610,25 @@ function renderApprovals() {
     const btns = [button(r.request_status === "pending" && !mine ? "심사" : "상세", () => showRequest(r.request_id))];
     if (r.request_status === "approved" && (r.label || r.approval_id))
       btns.push(button("회수", () => revoke(r.label, r.approval_id), "btn sm danger"));
-    const tr = row([r.label || mono(short(r.request_id)), who(r.requester_pseudo_id, r.requester_id),
+    const tr = row([materialName(r), who(r.requester_pseudo_id, r.requester_id),
                     who(r.recipient_pseudo_id && withName(r.recipient_pseudo_id, r.recipient_name), r.recipient_id), r.purpose,
                     pill(r.request_status), toKst(r.expires_at), actions(...btns)]);
     tr.dataset.id = r.request_id;
     return tr;
   }));
+}
+
+const SCOPE_KO = { name: "이름", profile: "공개 소개", education: "학력", employment: "재직", income: "소득 구간", marital_status: "혼인관계",
+  property: "부동산", photo: "프로필 사진", documents: "마스킹 문서 사본", contact: "연락처" };
+
+// 자료 이름: 기존 소개 자료는 이름(A-001_file1), 매칭 자료는 "자료 주인 → 받는 회원" + 짧은 번호
+function materialName(r) {
+  if (r.label) return r.label;
+  const owner = r.member_pseudo_id ? withName(r.member_pseudo_id, r.member_name) : "자료 주인";
+  const to = r.recipient_pseudo_id ? withName(r.recipient_pseudo_id, r.recipient_name) : "받는 회원";
+  const box = el("span");
+  box.append(el("strong", `${owner} → ${to}`), el("span", ` #${short(r.request_id)}`, "muted"));
+  return box;
 }
 
 function fact(dl, label, value, cls) {
@@ -521,11 +643,15 @@ async function showRequest(id) {
   const r = await res.json();
   for (const tr of $("approvals-body").children) tr.classList.toggle("selected", tr.dataset.id === id);
   const mine = r.requester_id === state.me.user_id;
-  $("detail-title").textContent = r.label ? `소개 자료 ${r.label}` : `신청 ${short(r.request_id)}`;
+  const ownerText = r.member_pseudo_id ? withName(r.member_pseudo_id, r.member_name) : "자료 주인";
+  const toText = r.recipient_pseudo_id ? withName(r.recipient_pseudo_id, r.recipient_name) : "받는 회원";
+  $("detail-title").textContent = r.label ? `소개 자료 ${r.label}` : `${ownerText}의 자료 → ${toText}`;
   $("detail-status").replaceChildren(pill(r.request_status));
   const facts = $("detail-facts");
   facts.replaceChildren();
-  fact(facts, "자료 이름", r.label || short(r.request_id));
+  fact(facts, "자료 이름", r.label || `${ownerText}의 소개 자료 (#${short(r.request_id)})`);
+  const scopes = r.preview && Array.isArray(r.preview.scopes) ? r.preview.scopes : null;
+  if (scopes) fact(facts, "제공 항목", scopes.map((x) => SCOPE_KO[x] || x).join(" · "));
   fact(facts, "신청 직원", (r.requester_pseudo_id || r.requester_id) + (mine ? " (본인)" : ""));
   fact(facts, "자료 주인 회원", r.member_pseudo_id ? withName(r.member_pseudo_id, r.member_name) : r.member_id);
   fact(facts, "받는 회원", r.recipient_pseudo_id ? withName(r.recipient_pseudo_id, r.recipient_name) : r.recipient_id);
@@ -543,7 +669,8 @@ async function showRequest(id) {
     for (const [k, v] of Object.entries(r.preview)) {
       if (k === 'fields' && Array.isArray(v)) {
         for (const field of v) fact(prev, field.label, `${field.value} · 검토 ${toKst(field.reviewed_at)}`, 'long');
-      } else fact(prev, names[k] || k, typeof v === "string" ? v : JSON.stringify(v), k === "introduction" ? "long" : "");
+      } else if (k === "scopes" && Array.isArray(v)) fact(prev, names[k], v.map((x) => SCOPE_KO[x] || x).join(" · "));
+      else fact(prev, names[k] || k, typeof v === "string" ? v : JSON.stringify(v), k === "introduction" ? "long" : "");
     }
   } else {
     fact(prev, "미리보기", "표시할 수 없습니다 (검사 미통과 또는 반출 금지 파일)");
@@ -729,23 +856,8 @@ init();
 
 
 async function loadMeetings() {
-  await StaffMatchingUI.render({root: $('matching-overview-panel'), api: matchingStaffApi});
-  const root = $('meeting-panel');
-  root.textContent = '담당 매칭을 불러오는 중입니다.';
-  try {
-    await MeetingStaffUI.render({
-      root,
-      matchLabel: match => match.label || `담당 매칭 ${short(match.match_id)}`,
-      api: async (path, options = {}) => {
-        const res = await api(path, {method: options.method || 'GET',
-          ...(options.body !== undefined ? {json: options.body} : {})});
-        if (!res.ok) throw new Error(await describe(res));
-        return res.json();
-      },
-      toast: message => { $('meeting-message').textContent = message; },
-      isCurrent: () => Boolean(document.querySelector('#nav button.active[data-view="meetings"]'))
-    });
-  } catch (error) { root.textContent = error.message; }
+  await StaffMatchingUI.render({root: $('matching-overview-panel'), api: matchingStaffApi,
+    isCurrent: () => Boolean(document.querySelector('#nav button.active[data-view="meetings"]'))});
 }
 
 async function matchingStaffApi(path, options = {}) {

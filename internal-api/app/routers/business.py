@@ -9,17 +9,19 @@
 import csv
 import io
 import json
+import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import Response
+from urllib.parse import quote
 from privacygate import gate_mode
 from privacygate.errors import ErrorCode, GateError
 from privacygate.policy import STAFF_ROLES, Principal, Role
 from pydantic import BaseModel, Field
 
-from .. import audit, db, jobs, notify, storage, transfer_client
+from .. import audit, db, evidence_rules, inspection, jobs, notify, storage, transfer_client
 from ..auth.session import member_token_via_transfer, member_via_transfer, require, require_csrf, require_service
 from ..config import get_settings
 
@@ -453,30 +455,60 @@ def register_export_to_transfer(export_id: uuid.UUID, request: Request,
 # ======================================================================
 
 # ======================================================================
+def _sniff(data: bytes) -> str | None:
+    if data.startswith(b"%PDF-") and b"%%EOF" in data[-2048:]:
+        return "application/pdf"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    return None
+
+
+_EXT = {"application/pdf": "pdf", "image/jpeg": "jpg", "image/png": "png"}
+
+
+def _evidence_file_name(pseudo_id: str, name: str | None, kind: str, media: str) -> str:
+    """회원이 올린 파일 이름은 버리고 "A-003(박도윤)_education.pdf" 형식으로 정한다 (경로·특수문자 없음)."""
+    safe = "".join(ch for ch in (name or "회원") if ch.isalnum())[:20] or "회원"
+    return f"{pseudo_id}({safe})_{kind}.{_EXT[media]}"
+
+
+def _disposition(file_name: str | None) -> str:
+    if not file_name:
+        return "inline"
+    ascii_name = "".join(ch if ch.isascii() and (ch.isalnum() or ch in "._-") else "_" for ch in file_name)
+    return f"inline; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(file_name)}"
+
+
 @router.post("/evidence-files", status_code=201)
 async def submit_evidence(request: Request, file: UploadFile = File(...),
-                          kind: str = Form("education", pattern="^(education|employment)$"),
+                          kind: str = Form("education", pattern="^(education|employment|identity|marital|income|property|photo)$"),
                           member: Principal = Depends(member_via_transfer)):
-
-
+    """회원 증빙 제출. 사진은 JPEG/PNG, 나머지는 PDF. 제출 후 doc-inspector 가 자동 검사한다."""
     s = get_settings()
     data = await file.read(s.evidence_max_bytes + 1)
     if len(data) > s.evidence_max_bytes:
         raise GateError(ErrorCode.INVALID_REQUEST, "evidence_too_large")
-    if not data.startswith(b"%PDF-") or b"%%EOF" not in data[-2048:]:
+    media = _sniff(data)
+    if kind == "photo" and media not in ("image/jpeg", "image/png"):
+        raise GateError(ErrorCode.INVALID_REQUEST, "photo_not_image", message="프로필 사진은 JPEG 또는 PNG 파일이어야 합니다.")
+    if kind != "photo" and media != "application/pdf":
         raise GateError(ErrorCode.INVALID_REQUEST, "evidence_not_pdf")
     owner = _member_of(member.user_id)
     file_id = uuid.uuid4()
     key = f"evidence/{file_id}.bin"
     storage.put(key, data)
     with db.connection() as conn:
+        name = conn.execute("SELECT name FROM members WHERE member_id = %s", (owner["member_id"],)).fetchone()["name"]
+        file_name = _evidence_file_name(owner["pseudo_id"], name, kind, media)
         row = conn.execute(
             """INSERT INTO evidence_files (file_id, member_id, submitted_by, kind, storage_key,
-                                           key_id, file_hash, status, delete_after)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, 'submitted', %s) RETURNING created_at""",
+                                           key_id, file_hash, status, delete_after, file_name)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, 'submitted', %s, %s) RETURNING created_at""",
             (file_id, owner["member_id"], member.user_id, kind, key, storage.key_id(),
-             storage.sha256_hex(data), _now() + timedelta(days=s.evidence_unreviewed_days))).fetchone()
-        kind_ko = "재직" if kind == "employment" else "학력"
+             storage.sha256_hex(data), _now() + timedelta(days=s.evidence_unreviewed_days), file_name)).fetchone()
+        kind_ko = evidence_rules.KIND_KO[kind]
         text = f"{notify.member_label(conn, owner['member_id'])} 회원이 {kind_ko} 증빙을 제출했습니다."
         notify.to_counselors_of(conn, owner["member_id"], "evidence_submitted", "새 증빙 서류", text, "evidence")
         notify.to_role(conn, "data_admin", "evidence_submitted", "새 증빙 서류", text, "evidence")
@@ -490,11 +522,13 @@ def list_evidence(request: Request, principal: Principal = Depends(require(*MEMB
     with db.connection() as conn:
         rows = conn.execute(
             f"""SELECT e.file_id, m.pseudo_id, m.name, m.member_id, e.kind, e.status, e.created_at,
-                       e.delete_after, e.legal_hold,
-                       r.result, u.pseudo_id AS reviewer
+                       e.delete_after, e.legal_hold, e.file_name,
+                       r.result, u.pseudo_id AS reviewer, i.status AS inspection, i.verdict, res.summary
                   FROM evidence_files e JOIN members m ON m.member_id = e.member_id
                   LEFT JOIN evidence_reviews r ON r.file_id = e.file_id
                   LEFT JOIN users u ON u.user_id = e.reviewer_user_id
+                  LEFT JOIN evidence_inspections i ON i.file_id = e.file_id
+                  LEFT JOIN evidence_results res ON res.file_id = e.file_id
                  WHERE {SCOPE_SQL} ORDER BY e.created_at DESC""",
             _scope(principal)).fetchall()
     audit.allow(request, target_type="evidence_list")
@@ -502,18 +536,25 @@ def list_evidence(request: Request, principal: Principal = Depends(require(*MEMB
                        "member_pseudo_id": r["pseudo_id"], "member_name": r["name"], "kind": r["kind"],
                        "status": r["status"], "review_result": r["result"],
                        "reviewer": r["reviewer"], "created_at": _iso(r["created_at"]),
-                       "delete_after": _iso(r["delete_after"]), "legal_hold": r["legal_hold"]} for r in rows]}
+                       "delete_after": _iso(r["delete_after"]), "legal_hold": r["legal_hold"],
+                       "inspection": r["inspection"], "verdict": r["verdict"], "result_summary": r["summary"],
+                       "file_name": r["file_name"]}
+                      for r in rows]}
 
 
 def _assigned_evidence(conn, file_id, principal: Principal) -> dict:
 
-    row = conn.execute(f"""SELECT e.file_id, e.member_id, e.kind, e.storage_key, e.status FROM evidence_files e
+    row = conn.execute(f"""SELECT e.file_id, e.member_id, e.kind, e.storage_key, e.status, e.file_name FROM evidence_files e
                              JOIN members m ON m.member_id = e.member_id
                             WHERE e.file_id = %(fid)s AND {SCOPE_SQL}""",
                        {**_scope(principal), "fid": file_id}).fetchone()
     if row is None:
         raise GateError(ErrorCode.NOT_FOUND, "evidence_not_in_scope")
     return row
+
+
+_SAFE_HEADERS = {"Content-Disposition": "inline", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
+                 "Content-Security-Policy": "sandbox; default-src 'none'"}
 
 
 @router.get("/evidence-files/{file_id}/content")
@@ -530,14 +571,70 @@ def read_evidence(file_id: uuid.UUID, request: Request,
                          (principal.user_id, file_id))
     data = storage.get(row["storage_key"])
     audit.allow(request, target_type="evidence", target_id=str(file_id))
-    return Response(data, media_type="application/pdf",
-                    headers={"Content-Disposition": "inline", "Cache-Control": "no-store",
-                             "X-Content-Type-Options": "nosniff",
-                             "Content-Security-Policy": "sandbox; default-src 'none'"})
+    return Response(data, media_type=_sniff(data) or "application/octet-stream",
+                    headers={**_SAFE_HEADERS, "Content-Disposition": _disposition(row["file_name"])})
+
+
+@router.get("/evidence-files/{file_id}/inspection")
+def evidence_inspection(file_id: uuid.UUID, request: Request,
+                        principal: Principal = Depends(require(*MEMBER_ROLES))):
+    """자동 검사 결과 (담당 범위만). 추출 값은 직원 심사 화면에서만 보인다. ※ 명세 외 추가"""
+    with db.connection() as conn:
+        row = _assigned_evidence(conn, file_id, principal)
+        ins = conn.execute("SELECT * FROM evidence_inspections WHERE file_id = %s", (file_id,)).fetchone()
+    audit.allow(request, target_type="evidence_inspection", target_id=str(file_id))
+    if ins is None:
+        return {"file_id": str(file_id), "kind": row["kind"], "file_name": row["file_name"], "status": "pending"}
+    fields = {}
+    if ins["fields_key"]:
+        try:
+            fields = json.loads(storage.get(ins["fields_key"]))
+        except Exception:
+            fields = {}
+    return {"file_id": str(file_id), "kind": row["kind"], "file_name": row["file_name"], "status": ins["status"],
+            "verdict": ins["verdict"],
+            "checks": ins["checks"], "detected": ins["detected"], "proposed": ins["proposed"], "summary": ins["summary"],
+            "fields": fields, "has_masked": bool(ins["masked_key"]), "error": ins["error"], "version": ins["version"],
+            "inspected_at": _iso(ins["inspected_at"]),
+            "options": {"income_bands": evidence_rules.INCOME_BANDS, "marital": evidence_rules.MARITAL,
+                        "regions": evidence_rules.REGIONS}}
+
+
+@router.get("/evidence-files/{file_id}/masked")
+def evidence_masked(file_id: uuid.UUID, request: Request,
+                    principal: Principal = Depends(require(*MEMBER_ROLES))):
+    """마스킹 사본 미리보기 (검사본 또는 심사 결과 사본). ※ 명세 외 추가"""
+    with db.connection() as conn:
+        _assigned_evidence(conn, file_id, principal)
+        row = conn.execute("""SELECT masked_key, masked_type FROM evidence_results WHERE file_id = %s AND masked_key IS NOT NULL
+                              UNION ALL
+                              SELECT masked_key, masked_type FROM evidence_inspections WHERE file_id = %s AND masked_key IS NOT NULL
+                              LIMIT 1""", (file_id, file_id)).fetchone()
+    if row is None:
+        raise GateError(ErrorCode.NOT_FOUND, "masked_copy_missing")
+    audit.allow(request, target_type="evidence_masked", target_id=str(file_id))
+    return Response(storage.get(row["masked_key"]), media_type=row["masked_type"], headers=_SAFE_HEADERS)
+
+
+@router.post("/evidence-files/{file_id}/inspect")
+def evidence_reinspect(file_id: uuid.UUID, request: Request,
+                       principal: Principal = Depends(require(*MEMBER_ROLES)), _csrf: None = Depends(require_csrf)):
+    """자동 검사 다시 실행 (심사 전 열린 증빙만). ※ 명세 외 추가"""
+    with db.connection() as conn:
+        row = _assigned_evidence(conn, file_id, principal)
+    if row["status"] not in ("submitted", "in_review") or not row["storage_key"]:
+        raise GateError(ErrorCode.INVALID_STATE, f"evidence_{row['status']}")
+    try:
+        result = inspection.run(file_id)
+    except inspection.InspectionError as exc:
+        raise GateError(ErrorCode.INVALID_STATE, "inspection_unavailable") from exc
+    audit.allow(request, target_type="evidence_inspection", target_id=str(file_id))
+    return {"file_id": str(file_id), **result}
 
 
 class ReviewIn(BaseModel):
     result: str = Field(pattern="^(passed|rejected)$")
+    facts: dict | None = None        # 혼인(status)·소득(band)·부동산(owns, region) 공개 사실 확정
 
 
 @router.post("/evidence-files/{file_id}/review")
@@ -551,15 +648,34 @@ def review_evidence(file_id: uuid.UUID, body: ReviewIn, request: Request,
         row = _assigned_evidence(conn, file_id, principal)
         if row["status"] not in ("submitted", "in_review"):
             raise GateError(ErrorCode.INVALID_STATE, f"evidence_{row['status']}")
+        facts = {}
+        if body.result == "passed":
+            try:
+                facts = evidence_rules.validate_facts(row["kind"], body.facts)
+            except ValueError as exc:
+                raise GateError(ErrorCode.INVALID_REQUEST, "evidence_facts_invalid", message=str(exc)) from None
         conn.execute("""INSERT INTO evidence_reviews (file_id, result, reviewer_user_id, criteria_date)
                         VALUES (%s, %s, %s, %s)""", (file_id, body.result, principal.user_id, date.today()))
         conn.execute("""UPDATE evidence_files SET status = 'reviewed', delete_after = %s,
                                reviewer_user_id = %s WHERE file_id = %s""",
                      (delete_after, principal.user_id, file_id))
         if body.result == "passed":
-
-            flag = "education_verified" if row["kind"] == "education" else "employment_verified"
-            conn.execute(f"UPDATE members SET {flag} = true WHERE member_id = %s", (row["member_id"],))
+            if row["kind"] in ("education", "employment"):
+                flag = "education_verified" if row["kind"] == "education" else "employment_verified"
+                conn.execute(f"UPDATE members SET {flag} = true WHERE member_id = %s", (row["member_id"],))
+            # 공개 가능한 결과: 요약 + (신분증 제외) 마스킹 사본을 별도 키로 복사해 원본 삭제 뒤에도 유지
+            ins = conn.execute("SELECT masked_key, masked_type FROM evidence_inspections WHERE file_id = %s AND status = 'done'",
+                               (file_id,)).fetchone()
+            masked_key = masked_hash = masked_type = None
+            if ins and ins["masked_key"] and row["kind"] != "identity":
+                blob = storage.get(ins["masked_key"])
+                masked_key, masked_type, masked_hash = f"results/{file_id}.masked", ins["masked_type"], storage.sha256_hex(blob)
+                storage.put(masked_key, blob)
+            conn.execute("""INSERT INTO evidence_results (file_id, member_id, kind, facts, summary, masked_key, masked_hash,
+                                                          masked_type, reviewed_by)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                         (file_id, row["member_id"], row["kind"], json.dumps(facts, ensure_ascii=False),
+                          evidence_rules.summary(row["kind"], facts), masked_key, masked_hash, masked_type, principal.user_id))
     audit.allow(request, target_type="evidence", target_id=str(file_id))
     return {"file_id": str(file_id), "kind": row["kind"], "status": "reviewed", "review_result": body.result,
             "delete_after": _iso(delete_after)}
@@ -721,6 +837,98 @@ def cancel_match(counterpart_member_id: uuid.UUID, request: Request,
                  member: Principal = Depends(member_via_transfer)):
 
     raise GateError(ErrorCode.INVALID_STATE, "use_paid_matching_api")
+
+
+# ======================================================================
+# 회원 본인 정보 (내 계정): 키·몸무게(본인 신고), 연락처, 프로필 사진 상태
+# 연락처는 여기서 등록·변경만 하고, 상대에게 주는 것은 매칭 공개 동의 + 일정 확정 + 직원 요청 + 승인자 승인 절차뿐이다.
+# ======================================================================
+_PHONE = re.compile(r"^01[016789]-?\d{3,4}-?\d{4}$")
+_EMAIL = re.compile(r"^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,120}\.[A-Za-z]{2,24}$")
+
+
+def _mask_phone(v):
+    return None if not v else re.sub(r"^(\d{3})-?(\d{3,4})-?(\d{4})$", lambda m: f"{m[1]}-{'*' * len(m[2])}-{m[3]}", v)
+
+
+def _mask_email(v):
+    if not v or "@" not in v:
+        return None
+    local, domain = v.split("@", 1)
+    return (local[:2] + "*" * max(len(local) - 2, 1)) + "@" + domain
+
+
+def _my_profile(conn, owner) -> dict:
+    photo = conn.execute(
+        """SELECT e.status, e.created_at, r.result FROM evidence_files e
+             LEFT JOIN evidence_reviews r ON r.file_id = e.file_id
+            WHERE e.member_id = %s AND e.kind = 'photo' ORDER BY e.created_at DESC LIMIT 1""",
+        (owner["member_id"],)).fetchone()
+    approved = conn.execute(
+        """SELECT res.created_at FROM evidence_results res WHERE res.member_id = %s AND res.kind = 'photo'
+            ORDER BY res.created_at DESC LIMIT 1""", (owner["member_id"],)).fetchone()
+    latest = None
+    if photo:
+        latest = {"status": photo["result"] or ("in_review" if photo["status"] == "in_review" else "submitted"),
+                  "submitted_at": _iso(photo["created_at"])}
+    return {"height_cm": owner["height_cm"], "weight_kg": owner["weight_kg"],
+            "contact_phone": _mask_phone(owner["contact_phone"]), "contact_email": _mask_email(owner["contact_email"]),
+            "photo": {"latest": latest, "approved_at": _iso(approved["created_at"]) if approved else None}}
+
+
+@router.get("/internal/my-profile")
+def my_profile(request: Request, member: Principal = Depends(member_via_transfer)):
+    """내 계정 정보 (연락처는 가린 값). ※ 명세 외 추가"""
+    owner = _member_of(member.user_id)
+    with db.connection() as conn:
+        row = conn.execute("SELECT * FROM members WHERE member_id = %s", (owner["member_id"],)).fetchone()
+        result = _my_profile(conn, row)
+    audit.allow(request, target_type="member_profile_self")
+    return result
+
+
+class MyProfileIn(BaseModel):
+    height_cm: int | None = Field(default=None, ge=120, le=230)
+    weight_kg: int | None = Field(default=None, ge=30, le=200)
+    contact_phone: str | None = Field(default=None, max_length=20)
+    contact_email: str | None = Field(default=None, max_length=200)
+
+
+@router.patch("/internal/my-profile")
+def update_my_profile(body: MyProfileIn, request: Request, member: Principal = Depends(member_via_transfer)):
+    """키·몸무게·연락처 변경 (보낸 항목만). 변경 내용 값은 알림·감사 로그에 남기지 않는다. ※ 명세 외 추가"""
+    owner = _member_of(member.user_id)
+    sent = body.model_dump(exclude_unset=True)
+    changes: dict = {}
+    for col in ("height_cm", "weight_kg"):
+        if sent.get(col) is not None:
+            changes[col] = sent[col]
+    if "contact_phone" in sent and sent["contact_phone"] is not None:
+        phone = sent["contact_phone"].strip()
+        if not _PHONE.match(phone):
+            raise GateError(ErrorCode.INVALID_REQUEST, "phone_invalid", message="휴대전화 번호 형식(010-1234-5678)을 확인하세요.")
+        digits = re.sub(r"\D", "", phone)
+        changes["contact_phone"] = f"{digits[:3]}-{digits[3:-4]}-{digits[-4:]}"
+    if "contact_email" in sent and sent["contact_email"] is not None:
+        email = sent["contact_email"].strip()
+        if email and not _EMAIL.match(email):
+            raise GateError(ErrorCode.INVALID_REQUEST, "email_invalid", message="이메일 형식을 확인하세요.")
+        changes["contact_email"] = email or None
+    if not changes:
+        raise GateError(ErrorCode.INVALID_REQUEST, "nothing_to_update", message="변경할 항목을 입력하세요.")
+    sets = ", ".join(f"{c} = %({c})s" for c in changes)
+    with db.connection() as conn:
+        conn.execute(f"UPDATE members SET {sets} WHERE member_id = %(mid)s AND status = 'active'",
+                     {**changes, "mid": owner["member_id"]})
+        labels = [x for x, keys in (("키·몸무게", ("height_cm", "weight_kg")), ("연락처", ("contact_phone", "contact_email")))
+                  if any(k in changes for k in keys)]
+        text = f"{notify.member_label(conn, owner['member_id'])} 회원이 {'·'.join(labels)}을(를) 직접 변경했습니다."
+        notify.to_counselors_of(conn, owner["member_id"], "member_profile_changed", "회원 정보 변경", text, "members")
+        updated = conn.execute("SELECT * FROM members WHERE member_id = %s", (owner["member_id"],)).fetchone()
+        result = _my_profile(conn, updated)
+    audit.allow(request, target_type="member_profile_self_update", target_id=owner["pseudo_id"],
+                reason=",".join(sorted(changes)))
+    return result
 
 
 # ======================================================================

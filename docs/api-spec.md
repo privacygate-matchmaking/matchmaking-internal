@@ -31,12 +31,17 @@ Keycloak client: `internal-web`, `external-web` · 쿠키: `internal_session`, `
 | POST | /api/members/{member_id}/withdraw/cancel | counselor(담당 회원), data_admin(전체) | 탈퇴 철회 (유예 중에만). data_admin 이 요청한 탈퇴는 data_admin 만 철회 ※명세 외 추가 |
 | GET | /api/admin/member-exports | data_admin (총관리자) | 전체 회원 내보내기 내역 (실행 직원·건수·중계 등록 여부, 파일 내용 없음) ※명세 외 추가 |
 | POST | /api/member-exports/{export_id}/transfer-files | counselor (본인이 만든 내보내기만) | 내보내기 파일 바이트를 internal-api 가 중계 `POST /api/transfer-files` 에 multipart 로 등록 (공격 연결 단계) ※명세 외 추가 |
-| POST | /api/evidence-files | 서비스: transfer-api + 회원 토큰 | **회원** 증빙 제출 (multipart PDF, 최대 2MiB) → AES-GCM 암호화 후 evidence-storage. 201 `{file_id, status}` (직원은 제출 불가) |
+| POST | /api/evidence-files | 서비스: transfer-api + 회원 토큰 | **회원** 증빙 제출 (multipart, 최대 2MiB, `kind` = education·employment·identity·marital·income·property 는 PDF, photo 는 JPEG/PNG) → AES-GCM 암호화 후 evidence-storage, 자동 검사 대기. 201 `{file_id, kind, status}` (직원은 제출 불가) |
 | GET | /api/evidence-files | counselor(담당 회원), data_admin(전체) | 증빙 목록 (file_id, 회원 가명 ID, 접수일, 상태, 심사자, 삭제 기한, 원본 내용 없음) ※명세 외 추가 |
 | GET | /api/evidence-files/{file_id}/content | counselor(담당 회원), data_admin(전체) | 심사 중에만 열람, 처음 연 직원이 심사자 |
-| POST | /api/evidence-files/{file_id}/review | counselor(담당 회원), data_admin(전체) | 심사 결과(통과·반려) 저장, 원본 삭제 기한 설정 |
+| POST | /api/evidence-files/{file_id}/review | counselor(담당 회원), data_admin(전체) | 심사 결과(통과·반려) 저장, 원본 삭제 기한 설정. 통과 시 공개 결과(요약·마스킹 사본) 생성 |
+| GET | /api/evidence-files/{file_id}/inspection | counselor(담당 회원), data_admin(전체) | 자동 검사 결과: 진위 판단(발급대장 대조), 개인정보 탐지 건수, 추출 값(직원 확인용), 공개 사실 제안 ※명세 외 추가 |
+| GET | /api/evidence-files/{file_id}/masked | counselor(담당 회원), data_admin(전체) | 마스킹 사본(PNG)·검토 사진(JPEG) 미리보기 ※명세 외 추가 |
+| POST | /api/evidence-files/{file_id}/inspect | counselor(담당 회원), data_admin(전체) + CSRF | 자동 검사 다시 실행 (심사 전 증빙만) ※명세 외 추가 |
 | POST | /api/internal/disclosure-checks | 서비스: transfer-api | 수신자-회원 관계·동의 확인 (결과만 응답) |
 | GET | /api/internal/my-evidence-files | 서비스: transfer-api + 회원 토큰 | 내 증빙 심사 상태 (원본·심사자 정보 없음) ※명세 외 추가 |
+| GET | /api/internal/my-profile | 서비스: transfer-api + 회원 토큰 | 내 계정: 키·몸무게, 가린 연락처, 프로필 사진 검토 상태 ※명세 외 추가 |
+| PATCH | /api/internal/my-profile | 서비스: transfer-api + 회원 토큰 | 키(120~230)·몸무게(30~200)·휴대전화·이메일 변경 (보낸 항목만), 담당 직원 알림 ※명세 외 추가 |
 | GET | /api/internal/my-status | 서비스: transfer-api + 회원 토큰 (회원 행 없어도 됨) | 내 계정 상태·탈퇴 안내 문구. 외부 화면은 로그인 직후 호출 ※명세 외 추가 |
 | POST | /api/internal/my-withdrawal | 서비스: transfer-api + 회원 토큰 | 회원 본인 탈퇴 신청 (7일 유예) ※명세 외 추가 |
 | POST | /api/internal/my-withdrawal/cancel | 서비스: transfer-api + 회원 토큰 | 본인이 신청한 탈퇴만 철회 (직원 처리 건은 403) ※명세 외 추가 |
@@ -102,7 +107,11 @@ external-api 에는 업무 DB·증빙 저장소 접근 권한이 없다.
 | `POST /api/member-exports/{export_id}/transfer-files` | `{}` → 중계 응답 그대로 (`{file_id, scan_status, export_banned, ...}`). 이미 등록했으면 409 |
 | `GET /api/evidence-files` | → `{"items": [{file_id, member_pseudo_id, status, review_result, created_at, delete_after, legal_hold}]}` |
 | `GET /api/evidence-files/{file_id}/content` | → `application/pdf` (no-store, sandbox CSP). submitted → in_review 로 바뀜 |
-| `POST /api/evidence-files/{file_id}/review` | `{"result": "passed"\|"rejected"}` → `{file_id, status: "reviewed", review_result, delete_after}` (삭제 기한 +7일) |
+| `POST /api/evidence-files/{file_id}/review` | `{"result": "passed"\|"rejected", "facts"?: {...}}` → `{file_id, status: "reviewed", review_result, delete_after}` (삭제 기한 +7일). 통과 시 `facts` 필수: 혼인 `{status: 미혼\|이혼\|사별}`, 소득 `{band: 3천만원 미만…1억원 이상}`, 부동산 `{owns: true, region: 시·도}` 또는 `{owns: false}` |
+| 증빙 파일 이름 | 회원이 올린 파일 이름은 쓰지 않고 서버가 `A-003(박도윤)_education.pdf` 형식으로 정해 `evidence_files.file_name` 에 저장. 직원 목록·심사 화면·원본 열람 응답(Content-Disposition)에만 쓰이며 저장 경로는 UUID 그대로 |
+| `GET /api/evidence-files/{file_id}/inspection` | → `{status: pending\|done\|failed, verdict: verified\|suspicious\|unchecked, checks: {issue_format, issue_checksum, registry_found, registry_kind, name_match, birth_match, registry_revoked}, detected: {resident_number: 1, …}, fields: {name, birth, issue_no, amount…}, proposed, summary, has_masked, options}` |
+| `POST /api/internal/matching-disclosures` | 화면 열람용. 텍스트 범위 + `name`(동의 시 profile 의 '소개 상대'를 실명으로, profile 없으면 name 항목) + `contact`(요청 body `contact_ready=true` 이고 신분증 통과·연락처 등록 시) |
+| `POST /api/internal/matching-release-checks` | 범위: profile·education·employment·income·marital_status·property(텍스트), photo(검토 사진), documents(함께 선택한 서류의 마스킹 사본), contact(신분증 통과 + 연락처 등록, 상호 동의·일정 확정은 중계가 확인). 사진·사본은 `attachments: [{name, label, media_type, sha256, data_base64}]` |
 | `POST /api/internal/disclosure-checks` | `{member_id, recipient_id, consent_id, purpose, item}` → 허용 `{"allowed": true, "expires_at", "member_pseudo_id"}`, 거부 `{"allowed": false}` 또는 공통 403. 조회 실패·미구현을 허용으로 해석하지 않음. 신청·승인·다운로드마다 재호출 |
 | `POST /api/evidence-files` | multipart `file`(PDF ≤2MiB) + `kind`(`education`=졸업증명서 / `employment`=재직증명서, 생략 시 education) → 201 `{file_id, kind, status}`. 통과 시 학력 → 매칭 가능, 재직 → 소개 자료에 직장 포함 |
 | `GET /api/internal/my-status` | → `{"status": "active"\|"withdraw_pending"\|"withdrawn"\|"not_registered", "by"?: "self"\|"staff", "reason"?: (직원 처리 건만), "withdraw_at"?, "withdrawn_at"?, "can_cancel"?, "message": "화면에 그대로 보여 줄 문구"}`. 예: 직원 처리 확정 "관리자에 의해 탈퇴 처리된 계정입니다. 사유: …", 본인 탈퇴 확정 "탈퇴된 계정입니다." 탈퇴 확정 후 안내 기간(기본 30일)이 지나면 Keycloak 계정이 삭제되어 로그인 자체가 안 됨 |

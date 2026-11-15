@@ -36,6 +36,9 @@ EXPECTED = {
     ("POST", "/api/internal/my-consents/{consent_id}/revoke"): "service:transfer-api",  # 명세 외 추가
     ("GET", "/api/evidence-files/{file_id}/content"): "roles:counselor,data_admin",
     ("POST", "/api/evidence-files/{file_id}/review"): "roles:counselor,data_admin",
+    ("GET", "/api/evidence-files/{file_id}/inspection"): "roles:counselor,data_admin",  # 자동 검사 결과 (명세 외 추가)
+    ("GET", "/api/evidence-files/{file_id}/masked"): "roles:counselor,data_admin",      # 마스킹 사본 미리보기
+    ("POST", "/api/evidence-files/{file_id}/inspect"): "roles:counselor,data_admin",    # 자동 검사 재실행
     ("GET", "/api/internal/my-matches"): "service:transfer-api",                       # 명세 외 추가
     ("POST", "/api/internal/my-matches"): "service:transfer-api",                      # 명세 외 추가
     ("POST", "/api/internal/my-matches/{counterpart_member_id}/cancel"): "service:transfer-api",  # 명세 외 추가
@@ -43,6 +46,8 @@ EXPECTED = {
     ("GET", "/api/internal/my-status"): "service:transfer-api",                       # 탈퇴 안내 (명세 외 추가)
     ("POST", "/api/internal/my-withdrawal"): "service:transfer-api",                  # 회원 본인 탈퇴 (명세 외 추가)
     ("POST", "/api/internal/my-withdrawal/cancel"): "service:transfer-api",
+    ("GET", "/api/internal/my-profile"): "service:transfer-api",                     # 내 계정 정보 (명세 외 추가)
+    ("PATCH", "/api/internal/my-profile"): "service:transfer-api",                   # 키·몸무게·연락처 변경
     ("POST", "/api/transfer-files"): "roles:counselor",
     ("POST", "/api/export-requests"): "roles:counselor",
     ("GET", "/api/export-requests"): "roles:approver,counselor",

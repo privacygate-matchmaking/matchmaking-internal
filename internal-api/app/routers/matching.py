@@ -1,4 +1,5 @@
 
+import base64
 import uuid
 from datetime import datetime, timezone
 from typing import Literal
@@ -6,7 +7,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from privacygate.errors import ErrorCode, GateError
 from privacygate.policy import Principal, Role
-from .. import audit, db, transfer_client
+from .. import audit, db, evidence_rules, storage, transfer_client
 from ..auth.session import member_via_transfer, staff_via_transfer, require, require_csrf, require_service
 from .business import _age, _iso, _public_label, _member_in_scope
 
@@ -26,13 +27,59 @@ def active_member(conn,user_id):
     return row
 
 
-def directory_card(row):
+def identity_passed(conn,member_id):
+    """신분증(본인 확인) 최신 심사가 통과인지."""
+    row=conn.execute("""SELECT r.result FROM evidence_files e JOIN evidence_reviews r ON r.file_id=e.file_id
+        WHERE e.member_id=%s AND e.kind='identity' ORDER BY r.created_at DESC LIMIT 1""",(member_id,)).fetchone()
+    return bool(row) and row['result']=='passed'
+
+
+def ready(conn,row):
+    """매칭 자격: 필수 증빙인 신분증(본인 확인)과 학력이 모두 통과."""
+    return bool(row['education_verified']) and identity_passed(conn,row['member_id'])
+
+
+def directory_card(row,eligible):
     age=_age(row['birth_date'])
     return {'member_id':str(row['member_id']),'user_id':str(row['user_id']),
         'pseudo_id':_public_label(row['birth_date'],row['education_level'])[:40],
         'age_band':f'만 {age}세' if age is not None else '비공개',
         'job_group':'비공개','introduction':'직원이 소개한 회원입니다. 상세 자료는 별도 공개 동의 후 확인합니다.',
-        'eligible':bool(row['education_verified'])}
+        'eligible':bool(eligible)}
+
+
+ALL_SCOPES=Literal['name','profile','photo','contact','education','employment','income','marital_status','property','documents']
+
+
+def passed_results(conn,member_id):
+    """종류별 최신 심사가 '통과'인 증빙과 그 공개 결과(요약·마스킹 사본)."""
+    rows=conn.execute("""SELECT kind,reviewed_at,summary,masked_key,masked_hash,masked_type FROM (
+        SELECT e.kind,r.result,r.created_at AS reviewed_at,res.summary,res.masked_key,res.masked_hash,res.masked_type,
+            row_number() OVER (PARTITION BY e.kind ORDER BY r.created_at DESC,r.file_id DESC) AS latest
+        FROM evidence_files e JOIN evidence_reviews r ON r.file_id=e.file_id
+        LEFT JOIN evidence_results res ON res.file_id=e.file_id
+        WHERE e.member_id=%s) x WHERE latest=1 AND result='passed'""",(member_id,)).fetchall()
+    return {r['kind']:r for r in rows}
+
+
+def text_value(scope,member,passed):
+    """화면 열람·자료에 공통으로 쓰는 한 줄 (원값 없이 검토 결과만). 없으면 None."""
+    kind=evidence_rules.SCOPE_KIND[scope]
+    if kind not in passed:return None
+    if scope=='profile':return _public_label(member['birth_date'],member['education_level'])
+    if scope=='education':return (member['education_level'] or '학력 자료 검토 완료') if member['education_verified'] else None
+    if scope=='employment':return '재직 자료 검토 완료 · '+(member['job_group'] or '직군 비공개') if member['employment_verified'] else None
+    return passed[kind]['summary']
+
+
+def attachment(row,name,label):
+    """마스킹 사본을 자료 파일에 넣는 형식. 저장된 해시와 다르면 넣지 않는다 (사본 바꿔치기 방지)."""
+    blob=storage.get(row['masked_key'])
+    if storage.sha256_hex(blob)!=row['masked_hash']:
+        raise GateError(ErrorCode.APPROVAL_MISMATCH,'masked_copy_hash_mismatch')
+    ext='jpg' if row['masked_type']=='image/jpeg' else 'png'
+    return {'name':f'{name}.{ext}','label':label,'media_type':row['masked_type'],'sha256':row['masked_hash'],
+            'data_base64':base64.b64encode(blob).decode('ascii')}
 
 
 @router.post('/internal/matching-directory')
@@ -43,8 +90,9 @@ def directory(body: Empty,request: Request,member: Principal=Depends(member_via_
             JOIN users u ON u.user_id=cm.user_id
             WHERE i.member_id=%s AND cm.status='active' AND u.active AND u.role='member'
             ORDER BY cm.member_id LIMIT 100""",(owner['member_id'],)).fetchall()
+        cards={'self':directory_card(owner,ready(conn,owner)),'items':[directory_card(row,ready(conn,row)) for row in rows]}
     audit.allow(request,target_type='matching_directory')
-    return {'self':directory_card(owner),'items':[directory_card(row) for row in rows]}
+    return cards
 
 
 class Disclosure(Strict):
@@ -52,13 +100,16 @@ class Disclosure(Strict):
     recipient_id: uuid.UUID
     grant_id: uuid.UUID
     match_id: uuid.UUID
-    scopes: list[Literal['profile','photo','contact','education','employment','income','marital_status']]=Field(min_length=1,max_length=7)
+    scopes: list[ALL_SCOPES]=Field(min_length=1,max_length=10)
     expires_at: AwareDatetime
     purpose: Literal['introduction']
+    contact_ready: bool=False      # 중계가 확인: 만남 일정 확정 + 두 회원 모두 연락처 동의
 
 
 @router.post('/internal/matching-disclosures')
 def disclosures(body: Disclosure,request: Request,member: Principal=Depends(member_via_transfer)):
+    """화면 열람용 검토 결과 (텍스트). 이름은 동의만으로, 연락처는 중계가 확인한 조건(일정 확정 + 상호 동의)과
+    본인 확인(신분증 통과)·연락처 등록이 있을 때만 넣는다. 사진·문서 사본은 직원 요청 + 승인자 승인 자료로만 제공한다."""
     if str(body.recipient_id)!=member.user_id or body.expires_at<=datetime.now(timezone.utc):
         raise GateError(ErrorCode.ACCESS_DENIED,'matching_context_invalid')
     with db.connection() as conn:
@@ -67,26 +118,29 @@ def disclosures(body: Disclosure,request: Request,member: Principal=Depends(memb
             JOIN users u ON u.user_id=cm.user_id
             WHERE i.member_id=%s AND cm.member_id=%s AND cm.status='active' AND u.active AND u.role='member'""",
             (owner['member_id'],body.member_id)).fetchone()
-        if not peer or not owner['education_verified'] or not peer['education_verified']:
+        if not peer or not ready(conn,owner) or not ready(conn,peer):
             raise GateError(ErrorCode.ACCESS_DENIED,'matching_peer_not_eligible')
-        reviews=conn.execute("""SELECT kind,result,reviewed_at FROM (
-            SELECT e.kind,r.result,r.created_at AS reviewed_at,
-                row_number() OVER (PARTITION BY e.kind ORDER BY r.created_at DESC,r.file_id DESC) AS latest
-            FROM evidence_files e JOIN evidence_reviews r ON r.file_id=e.file_id
-            WHERE e.member_id=%s) reviewed WHERE latest=1""",(peer['member_id'],)).fetchall()
-    reviewed={r['kind']:r['reviewed_at'] for r in reviews if r['result']=='passed'}
+        passed=passed_results(conn,peer['member_id'])
+    labels={'profile':'공개 소개','education':'학력 확인','employment':'재직 확인','income':'소득 구간',
+            'marital_status':'혼인관계','property':'부동산'}
     fields=[]
-    def add(scope,label,value,kind):
-        if scope in body.scopes and reviewed.get(kind):
-            fields.append({'scope':scope,'label':label,'value':value[:300],
-                           'review_status':'reviewed','reviewed_at':_iso(reviewed[kind])})
-    add('profile','공개 소개',_public_label(peer['birth_date'],peer['education_level']),'education')
-    if peer['education_verified']:
-        add('education','학력 확인',peer['education_level'] or '학력 자료 검토 완료','education')
-    if peer['employment_verified']:
-        add('employment','재직 확인','재직 자료 검토 완료 · '+(peer['job_group'] or '직군 비공개'),'employment')
-    # No original documents, real name, school/company, phone or unreviewed claim is returned.
-    # Contact/photo/income/marital_status stay unavailable until their review/release contract exists.
+    show_name='name' in body.scopes and peer['name'] and 'identity' in passed
+    for scope in evidence_rules.TEXT_SCOPES:
+        if scope not in body.scopes:continue
+        value=text_value(scope,peer,passed)
+        if value:
+            if scope=='profile' and show_name:value=value.replace('소개 상대',peer['name'],1)
+            fields.append({'scope':scope,'label':labels[scope],'value':value[:300],'review_status':'reviewed',
+                           'reviewed_at':_iso(passed[evidence_rules.SCOPE_KIND[scope]]['reviewed_at'])})
+    if show_name and 'profile' not in body.scopes:
+        fields.insert(0,{'scope':'name','label':'이름','value':peer['name'][:300],'review_status':'reviewed',
+                         'reviewed_at':_iso(passed['identity']['reviewed_at'])})
+    if 'contact' in body.scopes and body.contact_ready and 'identity' in passed:
+        parts=[p for p in (peer['contact_phone'] and '전화 '+peer['contact_phone'],
+                           peer['contact_email'] and '이메일 '+peer['contact_email']) if p]
+        if parts:
+            fields.append({'scope':'contact','label':'연락처','value':' · '.join(parts)[:300],'review_status':'reviewed',
+                           'reviewed_at':_iso(passed['identity']['reviewed_at'])})
     audit.allow(request,target_type='matching_disclosure',target_id=str(body.match_id))
     return {'member_id':str(peer['member_id']),'fields':fields}
 
@@ -105,7 +159,7 @@ def staff_check(body: StaffCheck,request: Request,staff: Principal=Depends(staff
         first,second=[active_member(conn,who) for who in ids]
         relation=conn.execute('SELECT 1 FROM introductions WHERE member_id=%s AND counterpart_member_id=%s',
                               (first['member_id'],second['member_id'])).fetchone()
-        if body.purpose=='meeting_schedule' and (not relation or not first['education_verified'] or not second['education_verified']):
+        if body.purpose=='meeting_schedule' and (not relation or not ready(conn,first) or not ready(conn,second)):
             raise GateError(ErrorCode.ACCESS_DENIED,'meeting_participants_not_eligible')
         rows=conn.execute("""SELECT m.user_id FROM assignments a JOIN members m ON m.member_id=a.member_id
             WHERE a.user_id=%s AND m.user_id=ANY(%s::uuid[])""",(staff.user_id,ids)).fetchall()
@@ -118,12 +172,19 @@ class ReleaseCheck(Strict):
     owner_id: uuid.UUID
     recipient_id: uuid.UUID
     member_id: uuid.UUID
-    scopes: list[Literal['profile','education','employment']]=Field(min_length=1,max_length=3)
+    scopes: list[ALL_SCOPES]=Field(min_length=1,max_length=10)
     requester_id: uuid.UUID
+
+
+RELEASE_LABELS={'name':'이름','profile':'공개 소개','education':'학력 확인','employment':'재직 확인','income':'소득 구간',
+                'marital_status':'혼인관계','property':'부동산','photo':'프로필 사진',
+                'documents':'검토·마스킹된 문서 사본','contact':'연락처'}
 
 
 @router.post('/internal/matching-release-checks')
 def release_check(body: ReleaseCheck,request: Request,claims: dict=Depends(require_service('transfer-api'))):
+    """반출 자료에 넣을 항목을 현재 심사 결과로 다시 만든다 (요청·승인·다운로드 때마다 호출).
+    연락처: 상호 동의·일정 확정은 중계가 확인하고, 여기서는 담당 직원·본인 확인(신분증 통과)·연락처 등록을 확인한다."""
     with db.connection() as conn:
         owner=active_member(conn,str(body.owner_id))
         peer=active_member(conn,str(body.recipient_id))
@@ -134,24 +195,45 @@ def release_check(body: ReleaseCheck,request: Request,claims: dict=Depends(requi
         assigned=conn.execute("""SELECT 1 FROM assignments a JOIN users u ON u.user_id=a.user_id
             WHERE a.member_id=%s AND a.user_id=%s AND u.active AND u.role='counselor'""",
             (owner['member_id'],body.requester_id)).fetchone()
-        if not relation or not assigned or not owner['education_verified'] or not peer['education_verified']:
+        if not relation or not assigned or not ready(conn,owner) or not ready(conn,peer):
             raise GateError(ErrorCode.ACCESS_DENIED,'matching_release_not_eligible')
-        reviews=conn.execute("""SELECT kind,result,reviewed_at FROM (
-            SELECT e.kind,r.result,r.created_at AS reviewed_at,
-                row_number() OVER (PARTITION BY e.kind ORDER BY r.created_at DESC,r.file_id DESC) AS latest
-            FROM evidence_files e JOIN evidence_reviews r ON r.file_id=e.file_id
-            WHERE e.member_id=%s) reviewed WHERE latest=1""",(owner['member_id'],)).fetchall()
-    passed={r['kind']:r for r in reviews if r['result']=='passed'}
-    definitions={'profile':('공개 소개',_public_label(owner['birth_date'],owner['education_level']),'education'),
-                 'education':('학력 확인',owner['education_level'] or '학력 자료 검토 완료','education'),
-                 'employment':('재직 확인','재직 자료 검토 완료 · '+(owner['job_group'] or '직군 비공개'),'employment')}
-    fields=[]
-    for scope in sorted(set(body.scopes)):
-        label,value,kind=definitions[scope]
-        if kind not in passed or (kind=='employment' and not owner['employment_verified']):
-            raise GateError(ErrorCode.INVALID_STATE,'matching_release_review_required',message='선택한 공개 항목의 증빙 심사가 필요합니다.')
-        fields.append({'scope':scope,'label':label,'value':value[:300],
-                       'review_status':'reviewed','reviewed_at':_iso(passed[kind]['reviewed_at'])})
+        passed=passed_results(conn,owner['member_id'])
+        need=lambda: GateError(ErrorCode.INVALID_STATE,'matching_release_review_required',message='선택한 공개 항목의 증빙 심사가 필요합니다.')
+        scopes=sorted(set(body.scopes))
+        fields=[]
+        for scope in scopes:
+            field={'scope':scope,'label':RELEASE_LABELS[scope],'review_status':'reviewed'}
+            if scope in evidence_rules.TEXT_SCOPES:
+                value=text_value(scope,owner,passed)
+                if not value:raise need()
+                if scope=='profile' and 'name' in scopes and owner['name']:value=value.replace('소개 상대',owner['name'],1)
+                field.update(value=value[:300],reviewed_at=_iso(passed[evidence_rules.SCOPE_KIND[scope]]['reviewed_at']))
+            elif scope=='name':
+                if 'identity' not in passed or not owner['name']:
+                    raise GateError(ErrorCode.INVALID_STATE,'name_identity_required',message='이름 공개 전 본인 확인(신분증) 심사가 필요합니다.')
+                field.update(value=owner['name'][:300],reviewed_at=_iso(passed['identity']['reviewed_at']))
+            elif scope=='photo':
+                row=passed.get('photo')
+                if not row or not row['masked_key']:raise need()
+                field.update(value=row['summary'][:300],reviewed_at=_iso(row['reviewed_at']),
+                             attachments=[attachment(row,'profile-photo','프로필 사진')])
+            elif scope=='documents':
+                kinds=[evidence_rules.SCOPE_KIND[s] for s in scopes if s in ('education','employment','income','marital_status','property')]
+                rows=[(k,passed[k]) for k in dict.fromkeys(kinds) if k in passed and passed[k]['masked_key']]
+                if not rows:
+                    raise GateError(ErrorCode.INVALID_STATE,'matching_release_document_missing',
+                                    message='문서 사본은 함께 선택한 항목(학력·재직·소득·혼인·부동산)의 마스킹 사본이 있어야 합니다.')
+                field.update(value='검토·마스킹 사본 '+str(len(rows))+'건 ('+', '.join(evidence_rules.KIND_KO[k] for k,_ in rows)+') · 원본 아님',
+                             reviewed_at=_iso(max(r['reviewed_at'] for _,r in rows)),
+                             attachments=[attachment(r,f'{k}-masked',evidence_rules.KIND_KO[k]+' 마스킹 사본') for k,r in rows])
+            elif scope=='contact':
+                if 'identity' not in passed:
+                    raise GateError(ErrorCode.INVALID_STATE,'contact_identity_required',message='연락처 전달 전 본인 확인(신분증) 심사가 필요합니다.')
+                parts=[p for p in (owner['contact_phone'] and '전화 '+owner['contact_phone'],
+                                   owner['contact_email'] and '이메일 '+owner['contact_email']) if p]
+                if not parts:raise GateError(ErrorCode.INVALID_STATE,'contact_missing',message='회원 연락처가 등록되어 있지 않습니다.')
+                field.update(value=' · '.join(parts)[:300],reviewed_at=_iso(passed['identity']['reviewed_at']))
+            fields.append(field)
     audit.allow(request,target_type='matching_release_check',target_id=str(body.member_id))
     return {'member_id':str(body.member_id),'fields':fields}
 
@@ -187,22 +269,13 @@ def matching_overview(request: Request,member_id: uuid.UUID | None=None,staff: P
 
 class Preparation(Strict):
     grant_id: uuid.UUID
-    scopes: list[Literal['profile','education','employment']]=Field(min_length=1,max_length=3)
+    scopes: list[ALL_SCOPES]=Field(min_length=1,max_length=10)
 
 
 @router.post('/matching/releases',status_code=201)
 def prepare_matching_release(body: Preparation,request: Request,
                              staff: Principal=Depends(require(Role.COUNSELOR)),csrf=Depends(require_csrf)):
     return relay(request,'POST','/api/matching/releases',body.model_dump(mode='json'))
-
-
-class Option(Strict):
-    starts_at: AwareDatetime
-    venue: str=Field(min_length=1,max_length=120)
-    address: str=Field(min_length=1,max_length=240)
-
-class Options(Strict):
-    options: list[Option]=Field(min_length=1,max_length=3)
 
 
 def relay(request,method,path,body=None):
@@ -235,12 +308,6 @@ def staff_matches(request: Request,staff: Principal=Depends(require(Role.COUNSEL
 @router.get('/matching/requests/{match_id}/meetings')
 def meetings(match_id: uuid.UUID,request: Request,staff: Principal=Depends(require(Role.COUNSELOR))):
     return relay(request,'GET',f'/api/matching/requests/{match_id}/meetings')
-
-
-@router.post('/matching/requests/{match_id}/meetings',status_code=201)
-def propose(match_id: uuid.UUID,body: Options,request: Request,staff: Principal=Depends(require(Role.COUNSELOR)),
-            csrf=Depends(require_csrf)):
-    return relay(request,'POST',f'/api/matching/requests/{match_id}/meetings',body.model_dump(mode='json'))
 
 
 @router.post('/matching/requests/{match_id}/meetings/{proposal_id}/confirm')

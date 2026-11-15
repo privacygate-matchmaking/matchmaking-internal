@@ -107,3 +107,71 @@
 `matchmaking-internal/tests/test_permissions.py` — 담당 범위 404, 즉시 탈퇴 총관리자 전용, 알림 본인 한정,
 회원 기능 서비스 토큰 필수, 직원 처리 탈퇴 회원 철회 불가, Keycloak 정리는 member 계정만 (15건).
 실행: privacygate 폴더에서 `docker compose exec -T internal-api python - < ../matchmaking-internal/tests/test_permissions.py`
+
+## 11. 증빙 확장·자동 검사·연락처 전달 (11월 15일 추가)
+
+이번에는 사용자 결정으로 **외부 레포 코드도 함께 수정**했습니다. 기존 흐름(신청 → 수락 → 공개 동의 → 직원 발송 요청 → 승인 → 다운로드)과 API 형식은 유지하고 범위만 넓혔습니다.
+
+### 무엇이 바뀌었나
+- 증빙 종류 추가: `identity`(신분증), `marital`(혼인관계증명서), `income`(소득), `property`(부동산)는 PDF, `photo`(프로필 사진)는 JPEG·PNG.
+- 내부에 **doc-inspector** 컨테이너 추가 (로컬 Tesseract OCR + 규칙 탐지). 개인정보를 찾아 가리고, 발급번호를 합성 발급대장과 대조해 진위를 판단합니다. 외부로 문서를 보내지 않습니다.
+- 공개 범위(scope) 추가: `property`, `documents`. 기존 `photo`·`contact`·`income`·`marital_status`도 실제로 동작합니다.
+  - 화면 열람(동의만): profile·education·employment·income·marital_status·property 의 **검토 결과 텍스트**.
+  - 승인 자료 전용(동의 + 담당 직원 요청 + 승인자 승인): `photo`(검토 사진), `documents`(함께 선택한 서류의 마스킹 사본), `contact`(연락처).
+- 연락처 조건: 두 회원 모두 `contact` 동의 + 만남 일정 확정(`matching_meeting_proposals.status='confirmed'`) + 자료 주인 신분증 통과. 요청·승인·다운로드 때마다 다시 확인하고, 한쪽이 철회하면 재다운로드가 막힙니다.
+
+### 외부 레포에서 바꾼 파일
+| 파일 | 내용 |
+|---|---|
+| `services/ieum/matching.py` | `Scope` 에 property·documents 추가, Sharing 최대 9개 |
+| `services/ieum/matching_routes.py` | `Attachment` 모델(형식·base64·SHA-256·파일 머리 검사), `ResultField.attachments`, 화면 열람에서 승인 전용 범위 제외 + `release_only_scopes` 응답 |
+| `services/ieum/matching_release.py` | 반출 가능 범위 확장, `contact_ready()`(상호 동의·일정 확정) 확인을 요청·승인·다운로드에 추가, 직원 현황에 `contact_ready` |
+| `services/ieum/transfer.py`, `external.py` | 증빙 종류 7가지, 사진은 JPEG/PNG·서류는 PDF 머리 검사 |
+| `external-web/public/material.js` (새 파일) | "제공 자료 → 자료 보기": 검토 텍스트·사진·마스킹 사본·연락처를 화면에 표시 (이미지 형식·문자 검사 후 data: 주소) |
+| `external-web/public/matching.js`, `app.js`, `index.html`, `style.css` | 공개 동의 항목 전체 표시(승인 전용 표시·안내), 증빙 종류 선택 확장, 자료 보기 버튼 |
+| `tests/integration/*`, `tests/frontend/material.test.cjs`, `.github/workflows/tests.yml` | 연락처 조건·첨부 검증·증빙 형식 시험 추가 (통합 133건, 프런트 15건 통과) |
+
+### 반출 자료 형식 (schema_version 3 유지)
+`fields[]` 항목에 선택적으로 `attachments: [{name, label, media_type: image/png|image/jpeg, sha256, data_base64}]` 가 붙습니다. 중계는 승인·다운로드 때 내부 결과를 다시 받아 **첨부까지 그대로 같은지** 비교합니다(사본 바꿔치기 차단).
+
+### Wazuh 참고 (추가 감사 항목)
+| 조건 | 의미 |
+|---|---|
+| `action=evidence_inspect`, `result=error` | 자동 검사 실패 (doc-inspector 장애·읽을 수 없는 파일) |
+| `action=evidence_inspect`, `reason=suspicious` | 진위 의심 서류 제출 (발급번호 위조·명의 불일치) → 중간 경보 제안 |
+| `target_type=evidence_inspection` / `evidence_masked` | 직원의 검사 결과·마스킹 사본 열람 |
+| 중계 `CONSENT_INVALID` + 연락처 메시지 | 조건 미충족 연락처 반출 시도 |
+
+### 시험 데이터
+`./infra/scripts/make-sample-evidence.sh A-003` 로 회원 A-003 의 합성 서류 6종 + 사진을 만들 수 있습니다 (발급번호가 합성 발급대장과 맞아 "진위 확인"이 나옵니다).
+
+### 내 계정 (11월 15일 추가)
+- "내 계정" 탭을 항상 표시하고 구성을 바꿨습니다: ① 로그인 비밀번호 변경 ② 프로필 사진 등록·변경 ③ 키·몸무게 ④ 연락처 변경 ⑤ 회원 탈퇴(회원 상태 연동이 켜진 경우만).
+- 비밀번호: `/auth/login?action=password` → Keycloak 비밀번호 변경 화면(`kc_action=UPDATE_PASSWORD`) → 일반 로그인처럼 돌아옴. 앱 서버는 비밀번호를 받지 않습니다 (`external.py` login 에 `action` 파라미터만 추가).
+- 프로필 사진: 증빙 관리 종류 목록에서 빼고 내 계정에서 등록 (`/api/me/evidence-files`, kind=photo 그대로 사용).
+- 키·몸무게·연락처: `GET/PATCH /api/me/profile` → 중계 `/api/internal/member-profile` → 내부 `/api/internal/my-profile`. 연락처는 가린 값만 내려오고, 바꾸면 이전 승인 연락처 자료는 무효(재다운로드 차단).
+- 바뀐 외부 파일: `member_account.py`(ProfileUpdate·중계/BFF 경로), `external.py`(login action), `account.js`(화면), `app.js`(내 계정 탭 항상 표시), `index.html`(증빙 종류에서 사진 제외), `style.css`, 시험 2건 추가.
+
+### 매칭 자격 변경 (11월 15일)
+- 필수 증빙이 신분증 + 학력으로 바뀌었습니다. 내부 `matching-directory` 의 `eligible` 은 두 가지 모두 통과해야 true 이고, 화면 열람·일정 확인·반출 검사도 같은 기준입니다. 외부 코드 변경은 없습니다(증빙 종류 목록에 (필수)/(선택)과 상태 표시, 신분증 첫 순서만 바뀜).
+
+### 만남 일정: 회원 간 합의 + 직원 승인 (11월 15일)
+- 흐름이 **회원 제안 → 상대 회원 응답 → 담당 직원 승인**으로 바뀌었습니다. 직원 제안 경로(`POST /api/matching/requests/{match_id}/meetings`)는 중계·내부 모두에서 삭제했습니다. 승인(`.../confirm`)·반려(`.../cancel`)·조회는 그대로입니다.
+- 회원 제안: `POST /api/me/matches/{match_id}/meetings` (BFF, CSRF) → 중계 `POST /api/internal/matching/requests/{match_id}/meetings` (서비스 토큰 + X-User-Token). 입력은 기존 `{options:[{starts_at,venue,address}]}` 최대 3개. 매칭 당사자만 가능하고, 확정 일정이 있으면 먼저 변경 요청을 보내야 합니다.
+- 제안한 회원은 각 후보에 자동으로 '가능' 응답이 기록됩니다. 상대가 같은 후보에 '가능'을 고르면 `both_available=true` → 직원 승인 가능. 회원 응답에는 `proposed_by_me` 가 추가됐습니다.
+- 직원 현황(`GET /api/matching/overview`) 각 항목에 `meeting_state`(none·proposed·awaiting_approval·confirmed)를 추가했습니다.
+- DB 변경은 없습니다(`proposed_by` 에 회원 user_id 가 들어감). `integrations/internal-scheduling/panel.js` 는 이전 방식(직원 제안) 참고용이며, 실제 직원 화면은 내부 `meeting-staff.js` 를 씁니다.
+- 바뀐 외부 파일: `meetings.py`(propose 를 회원용으로), `meeting_routes.py`(회원 제안 경로 추가·직원 제안 삭제), `matching_bff.py`(회원 제안 BFF), `matching_release.py`(`meeting_state`), `external-web/public/meetings.js`(제안 폼), `style.css`, 시험(`test_meetings.py`, `test_matching_release.py`, `meetings.test.cjs`).
+- 세부 규칙(11월 15일 추가): 상대는 후보 중 하나만 수락(다른 후보 수락 시 이전 수락은 `change_requested` 로 바뀜), 제안자는 상대 수락 전까지 수정 가능(수락 후 `meeting_already_accepted`). 화면은 빈 후보 무시·부분 입력 차단·보내기 전 확인 창.
+- 직원 토큰 검증 수정: 내부 `/api/internal/matching-staff-checks` 가 X-User-Token(직원 토큰)을 `aud=transfer-api` 로 검증합니다. 이전에는 `aud=internal-api` 를 요구해 실제 환경에서 항상 거절됐습니다(외부 코드 변경 없음).
+
+### 승인 자료 표시 (11월 16일)
+- 중계 `POST /api/internal/delivery-queries`(회원 제공 자료 목록) 각 항목에 `match_id` 를 추가했습니다(매칭 자료만, 그 외 null).
+- 외부 "상대가 허용한 정보"에서 연락처·사진·문서 사본이 승인돼 도착했으면 **승인된 자료 보기** 버튼으로 바로 볼 수 있습니다(기존 "제공 자료" 탭의 자료 보기와 같은 `MaterialUI`). 도착 전에는 기존처럼 "승인 자료로 전달 예정" 안내만 보입니다.
+- 바뀐 외부 파일: `transfer.py`(deliveries 에 match_id), `external-web/public/matching.js`, 시험 `test_matching_release.py`.
+
+### 공개 항목 조정: 모든 항목 승인 후 표시 (11월 16일)
+- 범위에 `name`(이름) 추가 → `Scope`·`SCOPES`·`Sharing.scopes`(최대 10)·반출 `SUPPORTED`/`ReleaseScope`. 승인 자료에 이름이 있으면 내부가 profile 문구의 "소개 상대"를 실명으로 바꿉니다.
+- **모든 항목은 승인 후에만 상대 화면에 보입니다.** 중계 profile 열람(`/api/internal/matching/requests/{id}/profile`)은 이제 값을 주지 않고 `consented_scopes`·`contact_pending`·`approval_required=true` 만 돌려줍니다. 외부 화면 "상대가 허용한 정보"는 이 매칭의 최신 승인 자료(`delivery-queries` 의 `match_id`)를 `MaterialUI.show(..., {compact:true})` 로 보여 줍니다.
+- 연락처는 기존대로 상호 연락처 동의 + 일정 확정(`contact_ready`)이 있어야 요청·승인·열람됩니다.
+- 바뀐 외부 파일: `matching.py`, `matching_routes.py`, `matching_release.py`, `transfer.py`(deliveries match_id), `matching.js`, `material.js`, 시험(`test_matching.py`, `test_matching_release.py`, `test_services.py`).

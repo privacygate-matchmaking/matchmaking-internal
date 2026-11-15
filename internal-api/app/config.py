@@ -37,6 +37,8 @@ class Settings:
     kc_admin_client_secret: str = ""
     kc_realm: str = "matchmaking"
     member_notice_days: int = 30                     # 탈퇴 확정 후 "탈퇴된 계정" 안내를 보여 주는 기간. 지나면 Keycloak 계정 삭제
+    inspector_url: str = "http://doc-inspector:8000" # 증빙 자동 검사 (로컬 OCR·마스킹)
+    inspection_seconds: int = 15                     # 미검사 증빙 처리 주기
 
     @property
     def redirect_uri(self) -> str:
@@ -66,4 +68,6 @@ def get_settings() -> Settings:
         kc_admin_client_secret=os.environ.get("KC_ADMIN_CLIENT_SECRET", ""),
         kc_realm=os.environ.get("KC_REALM", "matchmaking"),
         member_notice_days=int(os.environ.get("MEMBER_NOTICE_DAYS", "30")),
+        inspector_url=os.environ.get("INSPECTOR_URL", "http://doc-inspector:8000").rstrip("/"),
+        inspection_seconds=int(os.environ.get("INSPECTION_SECONDS", "15")),
     )
