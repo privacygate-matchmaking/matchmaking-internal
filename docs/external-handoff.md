@@ -217,3 +217,4 @@
 - 내 계정에 소개글 수정 칸(10~300자). 외부 BFF `PATCH /api/me/profile` 의 `ProfileUpdate` 에 `introduction` 추가(검사는 내부: 연락 수단 금지).
 - 후보 카드 `introduction` 이 회원 소개글이 되었고, "직원이 소개한 회원입니다…" 문구는 화면에서 작은 회색 안내로 표시합니다.
 - 바뀐 외부 파일: `services/ieum/member_account.py`, `external-web/public/account.js`, `matching.js`, `style.css`.
+- 후보 카드에 키·몸무게(본인 신고) 표시: 외부 `Person` 에 선택 필드 `height_cm`·`weight_kg`, `public()` 포함.
