@@ -58,6 +58,7 @@ class Connection:
         # 성별·가입 시각 (기본 시험은 성별 없음 → 직원 소개 관계만으로 후보)
         self.sql.execute('ALTER TABLE members ADD COLUMN gender TEXT')
         self.sql.execute("ALTER TABLE members ADD COLUMN created_at TEXT DEFAULT '2026-01-01'")
+        self.sql.execute('ALTER TABLE members ADD COLUMN introduction TEXT')
         self.sql.executemany('INSERT INTO introductions VALUES (?,?)',[(M,N),(N,M)])
         self.sql.execute('INSERT INTO assignments VALUES (?,?)',(A,M))
         self.sql.execute('INSERT INTO evidence_files VALUES (?,?,?)',('education-file',N,'education'))
@@ -498,3 +499,16 @@ def test_profile_photo_is_required_for_matching(client):
     conn.execute("INSERT INTO evidence_reviews VALUES ('photo-'||%s,'rejected','2026-02-01T00:00:00+00:00')",(M[-4:],))
     me=tc.post('/api/internal/matching-directory',headers=headers('B'),json={}).json()
     assert me['self']['requirements']['photo'] is False and me['self']['eligible'] is False
+
+
+def test_candidate_card_shows_member_introduction_without_contacts(client):
+    """후보 카드에는 회원 본인의 소개글. 연락 수단이 섞인 예전 소개글은 보여 주지 않는다."""
+    tc,conn,_=client
+    conn.execute("UPDATE members SET introduction='주말엔  등산을 좋아해요.' WHERE member_id=%s",(N,))
+    card=tc.post('/api/internal/matching-directory',headers=headers('B'),json={}).json()['items'][0]
+    assert card['introduction']=='주말엔 등산을 좋아해요.'
+    conn.execute("UPDATE members SET introduction='카톡 abc 로 연락주세요' WHERE member_id=%s",(N,))
+    card=tc.post('/api/internal/matching-directory',headers=headers('B'),json={}).json()['items'][0]
+    assert card['introduction']=='소개글을 확인 중입니다.' and 'abc' not in str(card)
+    conn.execute("UPDATE members SET introduction=NULL WHERE member_id=%s",(N,))
+    assert tc.post('/api/internal/matching-directory',headers=headers('B'),json={}).json()['items'][0]['introduction']=='아직 소개글을 작성하지 않았습니다.'

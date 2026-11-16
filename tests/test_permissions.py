@@ -246,7 +246,7 @@ class Permissions(unittest.TestCase):
 
     def test_member_profile_self_service(self):
         with self.db.connection() as conn:
-            orig = conn.execute("SELECT height_cm, weight_kg, contact_phone, contact_email FROM members WHERE member_id = %s",
+            orig = conn.execute("SELECT height_cm, weight_kg, contact_phone, contact_email, introduction FROM members WHERE member_id = %s",
                                 (member(3),)).fetchone()
         try:
             with self.as_member(MEMBER_B) as c:
@@ -262,10 +262,15 @@ class Permissions(unittest.TestCase):
                 self.assertEqual(c.patch("/api/internal/my-profile", json={"contact_phone": "12345"}).status_code, 422)
                 self.assertEqual(c.patch("/api/internal/my-profile", json={"height_cm": 300}).status_code, 422)
                 self.assertEqual(c.patch("/api/internal/my-profile", json={}).status_code, 422)
+                # 소개글: 저장되고, 연락 수단(전화·메신저·링크)이 있으면 거절
+                r = c.patch("/api/internal/my-profile", json={"introduction": "  주말에는   등산과 요리를 즐깁니다.  "})
+                self.assertEqual(r.json()["introduction"], "주말에는 등산과 요리를 즐깁니다.")
+                for bad in ("연락은 010-1234-5678 로", "카톡 abc123 주세요", "www.example.kr 참고", "짧음"):
+                    self.assertEqual(c.patch("/api/internal/my-profile", json={"introduction": bad}).status_code, 422, bad)
         finally:
             with self.db.connection() as conn:     # app_user 권한으로 원래 값 복원
-                conn.execute("UPDATE members SET height_cm = %s, weight_kg = %s, contact_phone = %s, contact_email = %s WHERE member_id = %s",
-                             (orig["height_cm"], orig["weight_kg"], orig["contact_phone"], orig["contact_email"], member(3)))
+                conn.execute("UPDATE members SET height_cm = %s, weight_kg = %s, contact_phone = %s, contact_email = %s, introduction = %s WHERE member_id = %s",
+                             (orig["height_cm"], orig["weight_kg"], orig["contact_phone"], orig["contact_email"], orig["introduction"], member(3)))
 
     def test_unknown_member_status(self):
         with self.as_member(str(uuid.uuid4())) as c:
