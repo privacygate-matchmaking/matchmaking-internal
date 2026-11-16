@@ -72,7 +72,7 @@ window.StaffMatchingUI = (() => {
       if(g.can_prepare&&g.supported_scopes.length) {
         const form=el('form');const checks=[];
         form.append(el('p','승인 후 상대 회원 화면에 표시할 항목을 선택하세요. 회원이 동의했더라도 이 요청과 승인 담당자 승인이 있어야 상대에게 보입니다. 원본은 포함하지 않으며, 문서 사본은 함께 선택한 서류 항목의 마스킹 사본만 들어갑니다.'));
-        if(g.scopes.includes('photo'))form.append(el('p',g.photo_ready?'프로필 사진: 두 회원 모두 사진 제공 동의 (선택 가능)':'프로필 사진: 상대 회원도 사진 제공에 동의해야 선택할 수 있습니다 (서로 제공해야 서로 봄).'));
+        if((g.mutual_waiting||[]).length)form.append(el('p',`${g.mutual_waiting.map(s=>names[s]||s).join('·')}: 상호 공개 항목이라 상대 회원도 같은 항목에 동의해야 선택할 수 있습니다.`));
         if(g.scopes.includes('contact'))form.append(el('p',g.contact_ready?'연락처: 일정 확정·상호 동의 확인됨 (선택 가능)':'연락처: 만남 일정 확정과 두 회원의 연락처 동의가 모두 있어야 선택할 수 있습니다.'));
         const checksBox=el('div');checksBox.className='check-row';
         for(const s of g.supported_scopes) {
