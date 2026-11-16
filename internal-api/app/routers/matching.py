@@ -39,6 +39,19 @@ def ready(conn,row):
     return bool(row['education_verified']) and identity_passed(conn,row['member_id'])
 
 
+# 소개 관계(후보 범위): 직원이 직접 소개한 쌍(introductions) 또는 성별이 다른 회원 쌍.
+# 담당 직원이 달라도 후보가 된다. 상대가 활동 중·회원 계정 연결인지는 각 쿼리에서 따로 확인한다.
+def pair_sql(a,b):
+    return (f"(EXISTS (SELECT 1 FROM introductions i WHERE i.member_id={a}.member_id AND i.counterpart_member_id={b}.member_id)"
+            f" OR ({a}.gender IS NOT NULL AND {b}.gender IS NOT NULL AND {a}.gender<>{b}.gender))")
+
+
+def related(conn,member_id,counterpart_id):
+    return conn.execute(f"""SELECT 1 FROM members x JOIN members y ON y.member_id=%s
+        WHERE x.member_id=%s AND x.member_id<>y.member_id AND {pair_sql('x','y')}""",
+        (str(counterpart_id),str(member_id))).fetchone() is not None
+
+
 def directory_card(row,eligible):
     age=_age(row['birth_date'])
     return {'member_id':str(row['member_id']),'user_id':str(row['user_id']),
@@ -86,10 +99,10 @@ def attachment(row,name,label):
 def directory(body: Empty,request: Request,member: Principal=Depends(member_via_transfer)):
     with db.connection() as conn:
         owner=active_member(conn,member.user_id)
-        rows=conn.execute("""SELECT cm.* FROM introductions i JOIN members cm ON cm.member_id=i.counterpart_member_id
+        rows=conn.execute(f"""SELECT cm.* FROM members me JOIN members cm ON cm.member_id<>me.member_id
             JOIN users u ON u.user_id=cm.user_id
-            WHERE i.member_id=%s AND cm.status='active' AND u.active AND u.role='member'
-            ORDER BY cm.member_id LIMIT 100""",(owner['member_id'],)).fetchall()
+            WHERE me.member_id=%s AND cm.status='active' AND u.active AND u.role='member' AND {pair_sql('me','cm')}
+            ORDER BY cm.created_at,cm.member_id LIMIT 100""",(owner['member_id'],)).fetchall()
         cards={'self':directory_card(owner,ready(conn,owner)),'items':[directory_card(row,ready(conn,row)) for row in rows]}
     audit.allow(request,target_type='matching_directory')
     return cards
@@ -114,9 +127,10 @@ def disclosures(body: Disclosure,request: Request,member: Principal=Depends(memb
         raise GateError(ErrorCode.ACCESS_DENIED,'matching_context_invalid')
     with db.connection() as conn:
         owner=active_member(conn,member.user_id)
-        peer=conn.execute("""SELECT cm.* FROM introductions i JOIN members cm ON cm.member_id=i.counterpart_member_id
+        peer=conn.execute(f"""SELECT cm.* FROM members me JOIN members cm ON cm.member_id<>me.member_id
             JOIN users u ON u.user_id=cm.user_id
-            WHERE i.member_id=%s AND cm.member_id=%s AND cm.status='active' AND u.active AND u.role='member'""",
+            WHERE me.member_id=%s AND cm.member_id=%s AND cm.status='active' AND u.active AND u.role='member'
+              AND {pair_sql('me','cm')}""",
             (owner['member_id'],body.member_id)).fetchone()
         if not peer or not ready(conn,owner) or not ready(conn,peer):
             raise GateError(ErrorCode.ACCESS_DENIED,'matching_peer_not_eligible')
@@ -148,7 +162,7 @@ def disclosures(body: Disclosure,request: Request,member: Principal=Depends(memb
 class StaffCheck(Strict):
     participant_user_ids: list[uuid.UUID]=Field(min_length=2,max_length=2)
     purpose: Literal['meeting_schedule','matching_overview']
-    action: Literal['read','propose','confirm','cancel']
+    action: Literal['read','propose','confirm','cancel','end']
 
 
 @router.post('/internal/matching-staff-checks')
@@ -157,8 +171,7 @@ def staff_check(body: StaffCheck,request: Request,staff: Principal=Depends(staff
     if len(set(ids))!=2:raise GateError(ErrorCode.INVALID_REQUEST,'distinct_participants_required')
     with db.connection() as conn:
         first,second=[active_member(conn,who) for who in ids]
-        relation=conn.execute('SELECT 1 FROM introductions WHERE member_id=%s AND counterpart_member_id=%s',
-                              (first['member_id'],second['member_id'])).fetchone()
+        relation=related(conn,first['member_id'],second['member_id'])
         if body.purpose=='meeting_schedule' and (not relation or not ready(conn,first) or not ready(conn,second)):
             raise GateError(ErrorCode.ACCESS_DENIED,'meeting_participants_not_eligible')
         rows=conn.execute("""SELECT m.user_id FROM assignments a JOIN members m ON m.member_id=a.member_id
@@ -205,8 +218,7 @@ def release_check(body: ReleaseCheck,request: Request,claims: dict=Depends(requi
         peer=active_member(conn,str(body.recipient_id))
         if str(owner['member_id'])!=str(body.member_id) or body.owner_id==body.recipient_id:
             raise GateError(ErrorCode.ACCESS_DENIED,'matching_release_subject_mismatch')
-        relation=conn.execute('SELECT 1 FROM introductions WHERE member_id=%s AND counterpart_member_id=%s',
-                              (owner['member_id'],peer['member_id'])).fetchone()
+        relation=related(conn,owner['member_id'],peer['member_id'])
         assigned=conn.execute("""SELECT 1 FROM assignments a JOIN users u ON u.user_id=a.user_id
             WHERE a.member_id=%s AND a.user_id=%s AND u.active AND u.role='counselor'""",
             (owner['member_id'],body.requester_id)).fetchone()
@@ -329,6 +341,13 @@ def meetings(match_id: uuid.UUID,request: Request,staff: Principal=Depends(requi
 def confirm(match_id: uuid.UUID,proposal_id: uuid.UUID,body: Empty,request: Request,
             staff: Principal=Depends(require(Role.COUNSELOR)),csrf=Depends(require_csrf)):
     return relay(request,'POST',f'/api/matching/requests/{match_id}/meetings/{proposal_id}/confirm',{})
+
+
+@router.post('/matching/requests/{match_id}/end')
+def end_match(match_id: uuid.UUID,body: Empty,request: Request,
+              staff: Principal=Depends(require(Role.COUNSELOR)),csrf=Depends(require_csrf)):
+    """담당 상담 직원의 관계 종료 (중계가 담당 범위를 다시 확인)."""
+    return relay(request,'POST',f'/api/matching/requests/{match_id}/end',{})
 
 
 @router.post('/matching/requests/{match_id}/meetings/{proposal_id}/cancel')

@@ -120,6 +120,8 @@ external-api 에는 업무 DB·증빙 저장소 접근 권한이 없다.
 | 증빙 파일 이름 | 회원이 올린 파일 이름은 쓰지 않고 서버가 `A-003(박도윤)_education.pdf` 형식으로 정해 `evidence_files.file_name` 에 저장. 직원 목록·심사 화면·원본 열람 응답(Content-Disposition)에만 쓰이며 저장 경로는 UUID 그대로 |
 | `GET /api/evidence-files/{file_id}/inspection` | → `{status: pending\|done\|failed, verdict: verified\|suspicious\|unchecked, checks: {issue_format, issue_checksum, registry_found, registry_kind, name_match, birth_match, registry_revoked}, detected: {resident_number: 1, …}, fields: {name, birth, issue_no, amount…}, proposed, summary, has_masked, options}` |
 | `POST /api/internal/matching-disclosures` | 화면 열람용. 텍스트 범위 + `name`(동의 시 profile 의 '소개 상대'를 실명으로, profile 없으면 name 항목) + `contact`(요청 body `contact_ready=true` 이고 신분증 통과·연락처 등록 시) |
+| `POST /api/internal/matching-directory` (후보 범위) | 직원 소개 관계(`introductions`) 또는 **성별이 다른** 활동 회원(회원 계정 연결). 담당 직원이 달라도 후보. 최대 100명, 가입 순. 공개 열람·반출·일정 확인의 관계 검사도 같은 기준 |
+| `POST /api/matching/requests/{match_id}/end` | 상담 직원 BFF(CSRF) → 중계 같은 경로. 관계 종료 |
 | `POST /api/internal/member-scope-checks` | 중계(transfer-api 서비스 토큰) + X-User-Token(직원 토큰, counselor·data_admin) `{user_id}` → `{allowed}`. 총관리자이거나 그 회원의 담당 상담 직원이면 true (회원 이용권 정보 조회 전 확인) |
 | `POST /api/internal/matching-release-checks` | 범위: profile·education·employment·income·marital_status·property(텍스트), photo(검토 사진), documents(함께 선택한 서류의 마스킹 사본), contact(신분증 통과 + 연락처 등록, 상호 동의·일정 확정은 중계가 확인). 사진·사본은 `attachments: [{name, label, media_type, sha256, data_base64}]` |
 | `POST /api/internal/disclosure-checks` | `{member_id, recipient_id, consent_id, purpose, item}` → 허용 `{"allowed": true, "expires_at", "member_pseudo_id"}`, 거부 `{"allowed": false}` 또는 공통 403. 조회 실패·미구현을 허용으로 해석하지 않음. 신청·승인·다운로드마다 재호출 |
