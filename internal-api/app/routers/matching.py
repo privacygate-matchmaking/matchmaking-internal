@@ -77,6 +77,7 @@ def directory_card(row,eligible):
         'pseudo_id':_public_label(row['birth_date'],row['education_level'])[:40],
         'age_band':f'만 {age}세' if age is not None else '비공개',
         'job_group':'비공개','introduction':intro_text(row),
+        'height_cm':row['height_cm'],'weight_kg':row['weight_kg'],      # 본인 신고 값
         'eligible':bool(eligible)}
 
 

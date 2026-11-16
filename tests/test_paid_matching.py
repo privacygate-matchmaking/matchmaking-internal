@@ -59,6 +59,8 @@ class Connection:
         self.sql.execute('ALTER TABLE members ADD COLUMN gender TEXT')
         self.sql.execute("ALTER TABLE members ADD COLUMN created_at TEXT DEFAULT '2026-01-01'")
         self.sql.execute('ALTER TABLE members ADD COLUMN introduction TEXT')
+        self.sql.execute('ALTER TABLE members ADD COLUMN height_cm INT')
+        self.sql.execute('ALTER TABLE members ADD COLUMN weight_kg INT')
         self.sql.executemany('INSERT INTO introductions VALUES (?,?)',[(M,N),(N,M)])
         self.sql.execute('INSERT INTO assignments VALUES (?,?)',(A,M))
         self.sql.execute('INSERT INTO evidence_files VALUES (?,?,?)',('education-file',N,'education'))
@@ -504,9 +506,9 @@ def test_profile_photo_is_required_for_matching(client):
 def test_candidate_card_shows_member_introduction_without_contacts(client):
     """후보 카드에는 회원 본인의 소개글. 연락 수단이 섞인 예전 소개글은 보여 주지 않는다."""
     tc,conn,_=client
-    conn.execute("UPDATE members SET introduction='주말엔  등산을 좋아해요.' WHERE member_id=%s",(N,))
+    conn.execute("UPDATE members SET introduction='주말엔  등산을 좋아해요.',height_cm=163,weight_kg=52 WHERE member_id=%s",(N,))
     card=tc.post('/api/internal/matching-directory',headers=headers('B'),json={}).json()['items'][0]
-    assert card['introduction']=='주말엔 등산을 좋아해요.'
+    assert card['introduction']=='주말엔 등산을 좋아해요.' and (card['height_cm'],card['weight_kg'])==(163,52)
     conn.execute("UPDATE members SET introduction='카톡 abc 로 연락주세요' WHERE member_id=%s",(N,))
     card=tc.post('/api/internal/matching-directory',headers=headers('B'),json={}).json()['items'][0]
     assert card['introduction']=='소개글을 확인 중입니다.' and 'abc' not in str(card)
