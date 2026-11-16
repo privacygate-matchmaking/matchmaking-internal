@@ -138,6 +138,7 @@ window.StaffSignupUI = (() => {
       box.append(ok, no); act.append(box); tr.append(act); body.append(tr);
     }
     table.append(head, body); wrap.append(table); root.append(wrap);
+    if (window.ListPager) ListPager.apply(body, [...body.children], { size: 10, search: true, placeholder: '이름·아이디·이메일·역할로 검색', label: '가입 신청 페이지' });
   }
 
   function bind(doc = document) {

@@ -426,3 +426,31 @@ def test_release_name_replaces_label_only_when_name_scope_is_approved(client):
     body['scopes']=['name','profile']
     fields={f['scope']:f['value'] for f in tc.post('/api/internal/matching-release-checks',headers=headers(),json=body).json()['fields']}
     assert fields['name']=='SECRET-NAME' and fields['profile'].startswith('SECRET-NAME')
+
+
+def test_member_scope_check_for_membership_view(client):
+    """중계가 회원 이용권 정보를 직원에게 주기 전: 담당 상담 직원(또는 총관리자)인지 내부가 확인한다."""
+    tc,conn,_=client
+    r=tc.post('/api/internal/member-scope-checks',headers=headers('staff'),json={'user_id':B})
+    assert r.status_code==200 and r.json()=={'allowed':True}
+    conn.execute('DELETE FROM assignments')
+    assert tc.post('/api/internal/member-scope-checks',headers=headers('staff'),json={'user_id':B}).json()=={'allowed':False}
+    conn.execute("UPDATE users SET role='approver' WHERE user_id=%s",(A,))
+    assert tc.post('/api/internal/member-scope-checks',headers=headers('staff'),json={'user_id':B}).status_code==403
+    assert tc.post('/api/internal/member-scope-checks',headers=headers('B'),json={'user_id':B}).status_code==403
+    assert tc.post('/api/internal/member-scope-checks',headers={'Authorization':'Bearer service'},json={'user_id':B}).status_code==401
+
+
+def test_member_detail_membership_fallback(monkeypatch):
+    """중계가 응답하지 않아도 회원 상세는 열리고, 이용권 정보만 '확인 불가'로 표시된다."""
+    from app.routers import business as biz
+    def fail(*a,**k):raise GateError(ErrorCode.INTERNAL_ERROR,'down')
+    monkeypatch.setattr(biz.transfer_client,'call',fail)
+    assert biz._membership(None,B)=={'available':False,'reason':'transfer_unreachable'}
+    assert biz._membership(None,None)=={'available':False,'reason':'no_account'}
+    class R:
+        status_code=200
+        def json(self):return {'paid':True,'wallet':{'available':3,'total':5},'last_paid_at':'2026-11-01T00:00:00Z','orders':[{}]*9}
+    monkeypatch.setattr(biz.transfer_client,'call',lambda *a,**k:R())
+    out=biz._membership(None,B)
+    assert out['available'] and out['paid'] and out['wallet']['available']==3 and len(out['orders'])==5

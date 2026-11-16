@@ -40,6 +40,7 @@ window.StaffMatchingUI = (() => {
         cell(tr,item.grants.length?`${item.grants.filter(g=>g.active).length}/${item.grants.length} 유효`:'없음');
         cell(tr,meeting);cell(tr,open);tbody.append(tr);
       }
+      if(window.ListPager)ListPager.apply(tbody,[...tbody.children],{size:10,search:true,placeholder:'매칭·상태·신청일로 검색',label:'매칭 목록 페이지'});
       if(ctx.matchId){const item=data.items.find(i=>i.match_id===ctx.matchId);if(item)showDetail(ctx,item,detail,()=>true);}
     }catch(error){root.replaceChildren(el('p',error.message));}
   }

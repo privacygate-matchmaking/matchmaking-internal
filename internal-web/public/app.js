@@ -83,11 +83,20 @@ function actions(...nodes) {
   nodes.filter(Boolean).forEach((n) => d.appendChild(n));
   return d;
 }
-function fill(bodyId, emptyId, rows) {
+// 목록은 10개씩 페이지로 나눈다 (pager.js). 검색은 전체 행에서 하고 결과도 10개씩 나눈다.
+const LIST_SEARCH = {
+  "requests-body": "소개 자료·받는 회원·목적·상태로 검색",
+  "exports-body": "내보내기 번호·실행 직원으로 검색",
+  "reviews-body": "파일 이름·회원·이름·종류·상태·심사자로 검색",
+  "approvals-body": "자료·신청 직원·받는 회원·목적·상태로 검색",
+};
+function fill(bodyId, emptyId, rows, opts = {}) {
   const body = $(bodyId);
-  body.replaceChildren(...rows);
-  $(emptyId).hidden = rows.length > 0;
+  if (!window.ListPager) { body.replaceChildren(...rows); $(emptyId).hidden = rows.length > 0; return; }
+  ListPager.apply(body, rows, { size: 10, empty: $(emptyId), search: !!LIST_SEARCH[bodyId],
+                               placeholder: LIST_SEARCH[bodyId], ...opts });
 }
+const listKey = (st) => `${st.q || ""}|${st.key || ""}|${st.dir || ""}`;
 function mono(text) { const s = el("span", text, "mono"); s.title = text || ""; return s; }
 
 function who(pseudo, id) { const s = el("span", pseudo || short(id), pseudo ? "" : "mono"); s.title = id || ""; return s; }
@@ -257,7 +266,8 @@ function renderMembers() {
   fill("members-body", "members-empty", items.map((m) =>
     row([memberCell(m), m.name ?? "-", m.gender ?? "-", ageText(m), m.height_cm ? `${m.height_cm}cm` : "-",
          withMark(m.education_level, m.education_verified), m.job_group ?? "-", m.counselors || "미배정",
-         memberStatus(m), actions(button("상세", () => showMember(m.member_id)))])));
+         memberStatus(m), actions(button("상세", () => showMember(m.member_id)))])),
+    { key: listKey(tableState.members), searching: !!tableState.members.q, label: "회원 목록 페이지" });
 }
 
 async function showMember(memberId) {
@@ -276,6 +286,8 @@ async function showMember(memberId) {
   fact(f, "키 · 몸무게", m.height_cm ? `${m.height_cm}cm · ${m.weight_kg ?? "-"}kg (본인 신고)` : "-");
   fact(f, "학력", `${m.education_level ?? "-"}${m.school ? ` · ${m.school}` : ""}${m.major ? ` ${m.major}` : ""}  [학력 증빙 ${m.education_verified ? "통과" : "미확인 — 매칭 불가"}]`);
   fact(f, "직군 · 직장", `${m.job_group ?? "-"}${m.company ? ` · ${m.company}` : ""}  [재직 증빙 ${m.employment_verified ? "통과 — 직장 공개" : "미확인 — 직장 비공개"}]`);
+  memberMembershipFacts(f, m.membership);
+  memberEvidenceFacts(f, m.verified_evidence || []);
   fact(f, "소개", m.introduction ?? "-", "long");
   if (m.status === "withdraw_pending") {
     const by = m.withdraw_by_role === "member" ? "회원 본인 신청"
@@ -292,9 +304,48 @@ async function showMember(memberId) {
                    pill(c.revoked_at ? "revoked" : c.valid ? "approved" : "rejected")];
     if (counselor) cells.push("기존 동의 기록 · 새 발송은 위 매칭 동의에서 요청");
     return row(cells);
-  }));
+  }), { key: m.member_id, label: "제공 동의 페이지" });
   box.hidden = false;
   box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+// 회원 상세: 승인된 증빙 결과(학력·재직은 위 줄에 표시) — 요약만, 원본·추출 값은 없음
+const EVIDENCE_FACT_ORDER = ["income", "property", "marital", "identity", "photo"];
+function memberEvidenceFacts(f, items) {
+  const byKind = Object.fromEntries(items.map((v) => [v.kind, v]));
+  const shown = EVIDENCE_FACT_ORDER.filter((k) => byKind[k]);
+  if (!shown.length) { fact(f, "증빙 확인", "학력·재직 외 승인된 증빙 없음"); return; }
+  for (const k of shown) {
+    const v = byKind[k];
+    const dd = el("dd");
+    dd.append(el("span", v.summary || "검토 완료", "fact-verified"),
+              el("span", `  · 승인 ${v.reviewed_at ? toKst(v.reviewed_at) : "-"}`, "fact-note"));
+    f.append(el("dt", `${KIND_KO[k] || k} 증빙`), dd);
+  }
+}
+
+// 회원 상세: 유료/무료, 남은 이용권, 구매일 (중계 서버에서 확인, 결제 수단·주문 번호는 받지 않음)
+function memberMembershipFacts(f, ms) {
+  if (!ms || !ms.available) {
+    const why = { no_account: "로그인 계정 없음", transfer_unreachable: "중계 서버 연결 안 됨" }[ms?.reason] || "확인할 수 없음";
+    fact(f, "회원 구분", `확인 불가 (${why})`);
+    return;
+  }
+  const w = ms.wallet || {};
+  const plan = ms.plan?.name || "정회원";
+  const dd = el("dd");
+  dd.append(el("span", ms.paid ? `유료 회원 · ${plan}` : "무료 회원", ms.paid ? "pill green" : "pill off"));
+  f.append(el("dt", "회원 구분"), dd);
+  if (ms.paid) {
+    fact(f, "이용권", `남은 ${w.available ?? 0}회 / 총 ${w.total ?? 0}회 (사용 ${w.used ?? 0} · 상대 응답 대기 ${w.reserved ?? 0})`
+      + (w.expires_at ? ` · ${toKst(w.expires_at)}까지` : ""));
+  } else if (w.total) {
+    fact(f, "이용권", `만료됨 (총 ${w.total}회 중 사용 ${w.used ?? 0}회)`);
+  }
+  const paid = (ms.orders || []).filter((o) => o.status === "paid");
+  fact(f, "구매일", ms.last_paid_at
+    ? `${toKst(ms.last_paid_at)}${paid.length > 1 ? ` (구매 ${paid.length}회)` : ""}`
+    : "구매 내역 없음");
 }
 
 function alertInline(node, text) { node.textContent = text; node.hidden = false; }
@@ -346,7 +397,7 @@ function renderManage() {
                 active ? actions(button("수정", () => openEdit(m)),
                                  button("탈퇴", () => withdraw(m), "btn sm danger"))
                        : pendingActions(m)]);
-  }));
+  }), { key: listKey(tableState.manage), searching: !!tableState.manage.q, label: "회원 관리 목록 페이지" });
 }
 
 function openEdit(m) {
@@ -485,7 +536,7 @@ function renderReviews() {
       toKst(e.delete_after) + (e.legal_hold ? " (보존)" : ""),
       open ? actions(button("검사·심사", () => openReviewPanel(e)), button("원본", () => openEvidence(e.file_id)))
            : (e.review_result === "passed" ? actions(button("결과", () => openReviewPanel(e))) : "-")]);
-  }));
+  }), { key: state.evFilter ?? "", label: "제출 서류 페이지" });
 }
 
 function selectField(label, options, value) {
@@ -616,7 +667,7 @@ function renderApprovals() {
                     pill(r.request_status), toKst(r.expires_at), actions(...btns)]);
     tr.dataset.id = r.request_id;
     return tr;
-  }));
+  }), { key: state.filter ?? "", label: "발송 신청 페이지" });
 }
 
 const SCOPE_KO = { name: "이름", profile: "공개 소개", education: "학력", employment: "재직", income: "소득 구간", marital_status: "혼인관계",

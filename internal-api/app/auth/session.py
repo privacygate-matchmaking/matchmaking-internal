@@ -126,3 +126,22 @@ def staff_via_transfer(request: Request, _svc: dict = Depends(_from_transfer)) -
     principal = Principal(str(row['user_id']), row['pseudo_id'], row['role'])
     request.state.principal = principal
     return principal
+
+
+def staff_or_admin_via_transfer(request: Request, _svc: dict = Depends(_from_transfer)) -> Principal:
+    """중계가 직원 토큰을 함께 보낸 요청 중 상담 직원·총관리자 (회원 이용권 조회 범위 확인용)."""
+    token = request.headers.get(USER_TOKEN_HEADER, '')
+    if not token:
+        raise GateError(ErrorCode.AUTH_REQUIRED, 'staff_token_missing')
+    claims = staff_relay_verifier().verify(token)
+    allowed = (Role.COUNSELOR.value, Role.DATA_ADMIN.value)
+    if claims.get('azp') != 'internal-web' or role_from_claims(claims) not in allowed:
+        raise GateError(ErrorCode.ACCESS_DENIED, 'not_staff_token')
+    with db.connection() as conn:
+        row = conn.execute('SELECT user_id, pseudo_id, role, active FROM users WHERE user_id = %s',
+                           (claims.get('sub'),)).fetchone()
+    if not row or not row['active'] or row['role'] not in allowed:
+        raise GateError(ErrorCode.ACCESS_DENIED, 'not_active_staff')
+    principal = Principal(str(row['user_id']), row['pseudo_id'], row['role'])
+    request.state.principal = principal
+    return principal

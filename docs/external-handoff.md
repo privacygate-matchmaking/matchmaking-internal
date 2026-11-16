@@ -193,3 +193,10 @@
 - 중계 → 내부 `POST /api/internal/member-notification-events` 는 사건 종류와 대상 회원 id만 보냅니다(`services/ieum/member_notify.py` 의 `notifier`). 연결 위치: `matching_routes.py`(신청·결정), `meeting_routes.py`(제안·응답·확정·반려), `transfer.py`(공개 승인·회수). 실패해도 업무 응답은 그대로이고 감사 로그에 `notify_failed:<kind>` 가 남습니다.
 - 증빙·사진 심사 결과 알림은 내부가 직접 만듭니다(외부 변경 없음).
 - 시험: `tests/integration/test_member_notify.py`, `test_services.py` 목 응답.
+
+### 목록 페이지·회원 이용권 표시 (11월 16일)
+- 외부 화면: 증빙 관리 5개, 내 계정 "증빙 자료 내역" 7개, 매칭 현황 7개씩 페이지로 나눕니다(`external-web/public/pager.js` 새 파일, 하단 ‹ 1 2 … › 와 "N건 중 a–b"). 소개 후보는 가로 스크롤(좌우 버튼·스와이프)입니다.
+- 내부 직원 화면: 모든 목록을 10개씩 나누고(`internal-web/public/pager.js`), 검색은 전체 목록에서 한 뒤 결과도 10개씩 나눕니다. 검색창이 없던 목록(발송 신청·내보내기·제출 서류·발송 승인·매칭·가입 신청)에도 검색창을 추가했습니다.
+- 회원 상세(담당 회원 조회)에 승인된 증빙 요약(소득 구간·부동산·혼인관계 등)과 유료/무료 구분·남은 이용권·구매일을 표시합니다.
+- 새 중계 경로 `GET /api/matching/members/{user_id}/membership`(직원 토큰, counselor·data_admin). 중계가 내부 `POST /api/internal/member-scope-checks` 로 담당 범위를 확인한 뒤 이용권 요약만 돌려줍니다(주문 번호·결제 정보 제외).
+- 바뀐 외부 파일: `services/ieum/transfer.py`, `external-web/public/pager.js`·`index.html`·`app.js`·`account.js`·`matching.js`·`style.css`, 시험 `tests/integration/test_member_membership.py`, `test_services.py`(목 응답).

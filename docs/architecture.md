@@ -128,6 +128,7 @@
 | external-api | `POST·GET /api/me/evidence-files`, `GET·POST /api/me/consents`, `POST /api/me/consents/{consent_id}/revoke` (명세 외 추가) | member | 2~3주차 |
 | external-api → transfer-api → internal-api | `GET /api/me/notifications`, `POST …/read`·`delete` → `/api/internal/member-notifications` → `/api/internal/my-notifications` (명세 외 추가: 회원 알림) / transfer-api → internal-api `POST /api/internal/member-notification-events` | member / 서비스 토큰 | 추가 |
 | external-api → transfer-api → internal-api | `POST /api/signup` → `POST /api/internal/member-signups` (명세 외 추가: 회원가입) | 로그인 전(Origin·횟수 제한) → 서비스 토큰 | 추가 |
+| internal-api → transfer-api → internal-api | 회원 상세 → `GET /api/matching/members/{user_id}/membership` → `POST /api/internal/member-scope-checks` (명세 외 추가: 회원 이용권 표시) | counselor(담당)·data_admin, 직원 토큰을 X-User-Token 으로 전달 | 추가 |
 
 오류는 `{"error": {"code", "message", "trace_id"}}` 형식이다. 코드: AUTH_REQUIRED(401), ACCESS_DENIED·APPROVAL_MISMATCH·APPROVAL_EXPIRED·CONSENT_INVALID(403), NOT_FOUND(404), INVALID_STATE(409), INVALID_REQUEST(422), INTERNAL_ERROR(500). 판단 근거는 감사 로그에만 남긴다.
 
@@ -188,6 +189,8 @@ GitHub 조직 `privacygate-matchmaking`에 세 레포를 두고, 같은 상위 �
 **열린 질문**
 
 - [ ] 서비스 간 TLS 적용 시점 (2주차 제안), Wazuh 실행 PC (메모리 4GB 이상)
+
+**시연 배포 (Tailscale Funnel, 무료)**: 컴퓨터 1(Mac)에서 Compose 전체를 실행하고, 인터넷에는 Funnel 로 회원 화면(443)과 회원 로그인 경로(8443 → `auth-gateway` → Keycloak `/realms/matchmaking`·`/resources` 만)만 공개한다. 직원 화면(:8080)·Keycloak 관리(:8081, `KC_HOSTNAME_ADMIN`)·Wazuh(:8444)는 `tailscale serve` 로 tailnet(팀원 기기) 전용이다. 외부 PC(Windows, Tailscale 미연결)는 인터넷을 거쳐 공개 주소로만 접속하고, `check-exposure.ps1` 로 공개·차단 결과를 증거로 남긴다. 서버가 물리적으로 한 대인 한계는 있으나 공개 범위(Funnel)·접근 주체(tailnet)·서비스 간 망(Docker internal 네트워크) 세 경계를 겹쳐 적용한다. 절차는 `privacygate/infra/funnel/README.md`.
 
 ## 9. 명세 대비 추가·변경 기록
 
@@ -260,3 +263,6 @@ GitHub 조직 `privacygate-matchmaking`에 세 레포를 두고, 같은 상위 �
 | 직원 로그인 화면을 회원 로그인과 같은 2단 구성으로 변경 (테마 CSS·그림만) | 두 로그인 화면의 구조를 맞추고 색으로 내부/외부를 구분 |
 | 외부 헤더·"내 계정"에 로그인한 회원 이름 표시 (내부 `my-profile` 에 본인 `name`·`username` 추가) | 어떤 계정으로 로그인했는지 바로 확인. 본인 정보만 반환 |
 | 외부 회원 알림 (헤더 종 아이콘, `notifications` 테이블 공유, 중계는 사건 종류만 전달) | 매칭·일정·공개 승인·심사 결과를 회원이 놓치지 않게 함. 문구를 내부가 정해 중계가 임의 내용을 회원에게 보낼 수 없고, 상대 개인정보는 알림에 담지 않음 |
+| 시연 배포: Tailscale Funnel(`compose.funnel.yaml`, `auth-gateway`, `infra/scripts/funnel.sh`), 로그인 후 주소를 `.env` 주소로 맞추는 `realm-setup.sh`, 외부 PC 노출 점검 `check-exposure.ps1`, nginx `real_ip`(Tailscale 이 전달한 접속 주소로 요청 횟수 제한) | 비용 없이 실제 인터넷 경유로 외부 공격자 시나리오를 시연하고, Keycloak 관리·직원 화면·Wazuh 는 인터넷에 노출하지 않음 |
+| 회원 상세에 승인된 증빙 요약(소득 구간 등)과 유료/무료·남은 이용권·구매일 표시. 이용권은 중계가 내부 `member-scope-checks` 로 담당 범위를 확인한 뒤 요약만 반환 | 상담 직원이 소개 전 회원 상태를 한 화면에서 확인. 주문 번호·결제 정보는 넘기지 않고, 담당이 아닌 회원의 이용권은 중계에서도 거절 |
+| 목록 페이지 나누기: 외부 증빙 5·증빙 내역 7·매칭 7개, 내부 모든 목록 10개. 검색은 전체 목록 기준 | 목록이 길어져도 화면이 늘어지지 않고, 다른 페이지의 항목도 검색으로 찾음 |

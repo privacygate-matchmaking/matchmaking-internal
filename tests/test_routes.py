@@ -44,6 +44,7 @@ EXPECTED = {
     ("POST", "/api/internal/my-matches/{counterpart_member_id}/cancel"): "service:transfer-api",  # 명세 외 추가
     ("POST", "/api/internal/disclosure-checks"): "service:transfer-api",
     ("GET", "/api/internal/my-status"): "service:transfer-api",                       # 탈퇴 안내 (명세 외 추가)
+    ("POST", "/api/internal/member-scope-checks"): "service:transfer-api",            # 이용권 조회 전 직원 범위 확인 (명세 외 추가)
     ("POST", "/api/internal/member-signups"): "service:transfer-api",                 # 회원가입 (명세 외 추가)
     ("POST", "/api/internal/member-notification-events"): "service:transfer-api",     # 회원 알림 만들기 (중계)
     ("GET", "/api/internal/my-notifications"): "service:transfer-api",                # 회원 알림 (명세 외 추가)
