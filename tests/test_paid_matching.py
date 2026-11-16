@@ -62,10 +62,11 @@ class Connection:
         self.sql.execute('INSERT INTO assignments VALUES (?,?)',(A,M))
         self.sql.execute('INSERT INTO evidence_files VALUES (?,?,?)',('education-file',N,'education'))
         self.sql.execute('INSERT INTO evidence_reviews VALUES (?,?,?)',('education-file','passed',datetime.now(timezone.utc).isoformat()))
-        # 필수 증빙: 신분증(본인 확인) 통과 (두 회원 모두)
+        # 필수 증빙: 신분증(본인 확인)·프로필 사진 통과 (두 회원 모두)
         for mid in (M,N):
-            self.sql.execute('INSERT INTO evidence_files VALUES (?,?,?)',('identity-'+mid[-4:],mid,'identity'))
-            self.sql.execute('INSERT INTO evidence_reviews VALUES (?,?,?)',('identity-'+mid[-4:],'passed','2026-01-01T00:00:00+00:00'))
+            for kind in ('identity','photo'):
+                self.sql.execute('INSERT INTO evidence_files VALUES (?,?,?)',(kind+'-'+mid[-4:],mid,kind))
+                self.sql.execute('INSERT INTO evidence_reviews VALUES (?,?,?)',(kind+'-'+mid[-4:],'passed','2026-01-01T00:00:00+00:00'))
     def execute(self,sql,params=()):
         params=list(params)
         if 'ANY(%s::uuid[])' in sql:
@@ -468,6 +469,8 @@ def test_opposite_gender_members_are_candidates_across_counselors(client):
         employment_verified,job_group,contact_phone,contact_email,gender) VALUES (%s,%s,'active','A-009','X','1994-01-01','4년제 대졸',1,0,'공공','-','-','여')""",(X,XU))
     conn.execute("INSERT INTO evidence_files VALUES ('identity-x',%s,'identity')",(X,))
     conn.execute("INSERT INTO evidence_reviews VALUES ('identity-x','passed','2026-01-01T00:00:00+00:00')")
+    conn.execute("INSERT INTO evidence_files VALUES ('photo-x',%s,'photo')",(X,))
+    conn.execute("INSERT INTO evidence_reviews VALUES ('photo-x','passed','2026-01-01T00:00:00+00:00')")
     conn.execute('INSERT INTO assignments VALUES (%s,%s)',('11111111-1111-4111-8111-111111111104',X))
     r=tc.post('/api/internal/matching-directory',headers=headers('B'),json={})
     assert [i['member_id'] for i in r.json()['items']]==[N]          # B 성별 미입력 → 소개 관계만
@@ -481,3 +484,17 @@ def test_opposite_gender_members_are_candidates_across_counselors(client):
     body={'participant_user_ids':[B,XU],'purpose':'meeting_schedule','action':'end'}
     r=tc.post('/api/internal/matching-staff-checks',headers=headers('staff'),json=body)
     assert r.status_code==200 and r.json()=={'allowed':True,'assigned_user_ids':[B]}   # 한쪽 담당이면 허용
+
+
+def test_profile_photo_is_required_for_matching(client):
+    """매칭 필수 조건에 프로필 사진 승인 추가: 사진이 반려(최신)되면 후보에서 빠지고 본인 조건 표시도 바뀐다."""
+    tc,conn,_=client
+    me=tc.post('/api/internal/matching-directory',headers=headers('B'),json={}).json()
+    assert me['self']['requirements']=={'identity':True,'education':True,'photo':True} and me['self']['eligible']
+    assert me['items'][0]['eligible'] and 'requirements' not in me['items'][0]
+    conn.execute("INSERT INTO evidence_reviews VALUES ('photo-'||%s,'rejected','2026-02-01T00:00:00+00:00')",(N[-4:],))
+    me=tc.post('/api/internal/matching-directory',headers=headers('B'),json={}).json()
+    assert me['items'][0]['eligible'] is False
+    conn.execute("INSERT INTO evidence_reviews VALUES ('photo-'||%s,'rejected','2026-02-01T00:00:00+00:00')",(M[-4:],))
+    me=tc.post('/api/internal/matching-directory',headers=headers('B'),json={}).json()
+    assert me['self']['requirements']['photo'] is False and me['self']['eligible'] is False

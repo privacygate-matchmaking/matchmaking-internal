@@ -27,16 +27,27 @@ def active_member(conn,user_id):
     return row
 
 
-def identity_passed(conn,member_id):
-    """신분증(본인 확인) 최신 심사가 통과인지."""
+def latest_passed(conn,member_id,kind):
+    """그 종류 증빙의 최신 심사가 통과인지."""
     row=conn.execute("""SELECT r.result FROM evidence_files e JOIN evidence_reviews r ON r.file_id=e.file_id
-        WHERE e.member_id=%s AND e.kind='identity' ORDER BY r.created_at DESC LIMIT 1""",(member_id,)).fetchone()
+        WHERE e.member_id=%s AND e.kind=%s ORDER BY r.created_at DESC LIMIT 1""",(member_id,kind)).fetchone()
     return bool(row) and row['result']=='passed'
 
 
+def identity_passed(conn,member_id):
+    """신분증(본인 확인) 최신 심사가 통과인지."""
+    return latest_passed(conn,member_id,'identity')
+
+
+def requirements(conn,row):
+    """매칭 필수 조건: 신분증(본인 확인)·학력·프로필 사진 심사 통과."""
+    return {'identity':identity_passed(conn,row['member_id']),'education':bool(row['education_verified']),
+            'photo':latest_passed(conn,row['member_id'],'photo')}
+
+
 def ready(conn,row):
-    """매칭 자격: 필수 증빙인 신분증(본인 확인)과 학력이 모두 통과."""
-    return bool(row['education_verified']) and identity_passed(conn,row['member_id'])
+    """매칭 자격: 필수 조건(신분증·학력·프로필 사진)이 모두 통과."""
+    return all(requirements(conn,row).values())
 
 
 # 소개 관계(후보 범위): 직원이 직접 소개한 쌍(introductions) 또는 성별이 다른 회원 쌍.
@@ -103,7 +114,8 @@ def directory(body: Empty,request: Request,member: Principal=Depends(member_via_
             JOIN users u ON u.user_id=cm.user_id
             WHERE me.member_id=%s AND cm.status='active' AND u.active AND u.role='member' AND {pair_sql('me','cm')}
             ORDER BY cm.created_at,cm.member_id LIMIT 100""",(owner['member_id'],)).fetchall()
-        cards={'self':directory_card(owner,ready(conn,owner)),'items':[directory_card(row,ready(conn,row)) for row in rows]}
+        cards={'self':{**directory_card(owner,ready(conn,owner)),'requirements':requirements(conn,owner)},
+               'items':[directory_card(row,ready(conn,row)) for row in rows]}
     audit.allow(request,target_type='matching_directory')
     return cards
 
