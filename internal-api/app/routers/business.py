@@ -14,6 +14,7 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
+from cryptography.exceptions import InvalidTag
 from fastapi.responses import Response
 from urllib.parse import quote
 from privacygate import gate_mode
@@ -613,8 +614,13 @@ def evidence_masked(file_id: uuid.UUID, request: Request,
                               LIMIT 1""", (file_id, file_id)).fetchone()
     if row is None:
         raise GateError(ErrorCode.NOT_FOUND, "masked_copy_missing")
+    try:
+        blob = storage.get(row["masked_key"])
+    except (FileNotFoundError, ValueError, InvalidTag):
+        raise GateError(ErrorCode.NOT_FOUND, "masked_copy_missing",
+                        message="검사 사본을 읽지 못했습니다. '자동 검사 다시 실행'을 눌러 주세요.") from None
     audit.allow(request, target_type="evidence_masked", target_id=str(file_id))
-    return Response(storage.get(row["masked_key"]), media_type=row["masked_type"], headers=_SAFE_HEADERS)
+    return Response(blob, media_type=row["masked_type"], headers=_SAFE_HEADERS)
 
 
 @router.post("/evidence-files/{file_id}/inspect")
@@ -669,7 +675,11 @@ def review_evidence(file_id: uuid.UUID, body: ReviewIn, request: Request,
                                (file_id,)).fetchone()
             masked_key = masked_hash = masked_type = None
             if ins and ins["masked_key"] and row["kind"] != "identity":
-                blob = storage.get(ins["masked_key"])
+                try:
+                    blob = storage.get(ins["masked_key"])
+                except (FileNotFoundError, ValueError, InvalidTag):
+                    raise GateError(ErrorCode.INVALID_STATE, "masked_copy_missing",
+                                    message="검사 사본을 읽지 못했습니다. '자동 검사 다시 실행' 후 다시 심사하세요.") from None
                 masked_key, masked_type, masked_hash = f"results/{file_id}.masked", ins["masked_type"], storage.sha256_hex(blob)
                 storage.put(masked_key, blob)
             conn.execute("""INSERT INTO evidence_results (file_id, member_id, kind, facts, summary, masked_key, masked_hash,
@@ -897,6 +907,34 @@ class MyProfileIn(BaseModel):
     weight_kg: int | None = Field(default=None, ge=30, le=200)
     contact_phone: str | None = Field(default=None, max_length=20)
     contact_email: str | None = Field(default=None, max_length=200)
+
+
+@router.get("/internal/my-photo")
+def my_photo(request: Request, which: str = "approved", member: Principal = Depends(member_via_transfer)):
+    """내 프로필 사진 미리보기 (본인만). approved = 승인된 사진, latest = 검토 중인 최신 사진.
+    원본이 아니라 위치 등 메타데이터를 지운 사본만 돌려준다. ※ 명세 외 추가"""
+    if which not in ("approved", "latest"):
+        raise GateError(ErrorCode.INVALID_REQUEST, "photo_which_invalid")
+    owner = _member_of(member.user_id)
+    with db.connection() as conn:
+        if which == "approved":
+            row = conn.execute("""SELECT masked_key, masked_type FROM evidence_results
+                                   WHERE member_id = %s AND kind = 'photo' AND masked_key IS NOT NULL
+                                   ORDER BY created_at DESC LIMIT 1""", (owner["member_id"],)).fetchone()
+        else:
+            row = conn.execute("""SELECT i.masked_key, i.masked_type FROM evidence_files e
+                                    JOIN evidence_inspections i ON i.file_id = e.file_id
+                                   WHERE e.member_id = %s AND e.kind = 'photo' AND e.status IN ('submitted', 'in_review')
+                                     AND i.status = 'done' AND i.masked_key IS NOT NULL
+                                   ORDER BY e.created_at DESC LIMIT 1""", (owner["member_id"],)).fetchone()
+    if row is None or row["masked_type"] not in ("image/jpeg", "image/png"):
+        raise GateError(ErrorCode.NOT_FOUND, "photo_missing", message="표시할 사진이 없습니다.")
+    try:
+        blob = storage.get(row["masked_key"])
+    except (FileNotFoundError, ValueError, InvalidTag):
+        raise GateError(ErrorCode.NOT_FOUND, "photo_missing", message="표시할 사진이 없습니다.") from None
+    audit.allow(request, target_type="member_photo_self", reason=which)
+    return Response(blob, media_type=row["masked_type"], headers=_SAFE_HEADERS)
 
 
 @router.patch("/internal/my-profile")
