@@ -218,3 +218,7 @@
 - 후보 카드 `introduction` 이 회원 소개글이 되었고, "직원이 소개한 회원입니다…" 문구는 화면에서 작은 회색 안내로 표시합니다.
 - 바뀐 외부 파일: `services/ieum/member_account.py`, `external-web/public/account.js`, `matching.js`, `style.css`.
 - 후보 카드에 키·몸무게(본인 신고) 표시: 외부 `Person` 에 선택 필드 `height_cm`·`weight_kg`, `public()` 포함.
+
+### 상호주의 공개 (11월 16일)
+- 중계 `MUTUAL={'name','photo','income','property','marital_status'}`: 상대도 같은 항목을 공개해야 요청·승인·다운로드(`mutual_ready`). 개요 `mutual_waiting`, 회원 열람 `mutual_pending`. 내부 직원 화면은 `mutual_waiting` 안내.
+- 바뀐 외부 파일: `matching_release.py`, `matching_routes.py`, `external-web/public/matching.js`, 시험 `test_matching_release.py`·`test_matching.py`.
