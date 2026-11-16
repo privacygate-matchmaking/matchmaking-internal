@@ -39,14 +39,24 @@ def identity_passed(conn,member_id):
     return latest_passed(conn,member_id,'identity')
 
 
+def marital_status(conn,member_id):
+    """혼인관계증명서 최신 심사가 통과면 직원이 확정한 상태(미혼·이혼·사별), 아니면 None."""
+    row=conn.execute("""SELECT r.result,res.summary FROM evidence_files e JOIN evidence_reviews r ON r.file_id=e.file_id
+        LEFT JOIN evidence_results res ON res.file_id=e.file_id
+        WHERE e.member_id=%s AND e.kind='marital' ORDER BY r.created_at DESC LIMIT 1""",(member_id,)).fetchone()
+    if not row or row['result']!='passed':return None
+    status=(row['summary'] or '').replace('혼인관계 확인:','').strip()
+    return status[:20] or '확인 완료'
+
+
 def requirements(conn,row):
-    """매칭 필수 조건: 신분증(본인 확인)·학력·프로필 사진 심사 통과."""
+    """매칭 필수 조건: 신분증(본인 확인)·학력·프로필 사진·혼인관계증명서 심사 통과."""
     return {'identity':identity_passed(conn,row['member_id']),'education':bool(row['education_verified']),
-            'photo':latest_passed(conn,row['member_id'],'photo')}
+            'photo':latest_passed(conn,row['member_id'],'photo'),'marital':latest_passed(conn,row['member_id'],'marital')}
 
 
 def ready(conn,row):
-    """매칭 자격: 필수 조건(신분증·학력·프로필 사진)이 모두 통과."""
+    """매칭 자격: 필수 조건(신분증·학력·프로필 사진·혼인관계)이 모두 통과."""
     return all(requirements(conn,row).values())
 
 
@@ -79,6 +89,11 @@ def directory_card(row,eligible):
         'job_group':'비공개','introduction':intro_text(row),
         'height_cm':row['height_cm'],'weight_kg':row['weight_kg'],      # 본인 신고 값
         'eligible':bool(eligible)}
+
+
+def directory_entry(conn,row):
+    """후보 카드 = 기본 카드 + 혼인관계(필수 증빙으로 직원이 확정한 상태, 카드에 공개)."""
+    return {**directory_card(row,ready(conn,row)),'marital_status':marital_status(conn,row['member_id'])}
 
 
 ALL_SCOPES=Literal['name','profile','photo','contact','education','employment','income','marital_status','property','documents']
@@ -124,7 +139,7 @@ def directory(body: Empty,request: Request,member: Principal=Depends(member_via_
             WHERE me.member_id=%s AND cm.status='active' AND u.active AND u.role='member' AND {pair_sql('me','cm')}
             ORDER BY cm.created_at,cm.member_id LIMIT 100""",(owner['member_id'],)).fetchall()
         cards={'self':{**directory_card(owner,ready(conn,owner)),'requirements':requirements(conn,owner)},
-               'items':[directory_card(row,ready(conn,row)) for row in rows]}
+               'items':[directory_entry(conn,row) for row in rows]}
     audit.allow(request,target_type='matching_directory')
     return cards
 

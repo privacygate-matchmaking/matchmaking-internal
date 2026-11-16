@@ -222,3 +222,7 @@
 ### 상호주의 공개 (11월 16일)
 - 중계 `MUTUAL={'name','photo','income','property','marital_status'}`: 상대도 같은 항목을 공개해야 요청·승인·다운로드(`mutual_ready`). 개요 `mutual_waiting`, 회원 열람 `mutual_pending`. 내부 직원 화면은 `mutual_waiting` 안내.
 - 바뀐 외부 파일: `matching_release.py`, `matching_routes.py`, `external-web/public/matching.js`, 시험 `test_matching_release.py`·`test_matching.py`.
+
+### 혼인관계증명서 필수·카드 표시 (11월 16일)
+- 내부 매칭 자격에 혼인관계증명서 최신 심사 통과 추가, `requirements.marital`. 후보 카드 `marital_status`(외부 `Person` 선택 필드).
+- 외부: 후보 카드 "만 30세 · 160cm · 50kg · 미혼" + 작은 출처 안내, 매칭 조건 체크리스트에 혼인관계증명서, 공개 범위 목록에서 혼인관계 제외(이전 동의 표시용 이름은 유지).

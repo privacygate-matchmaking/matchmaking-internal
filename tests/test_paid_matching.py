@@ -65,9 +65,9 @@ class Connection:
         self.sql.execute('INSERT INTO assignments VALUES (?,?)',(A,M))
         self.sql.execute('INSERT INTO evidence_files VALUES (?,?,?)',('education-file',N,'education'))
         self.sql.execute('INSERT INTO evidence_reviews VALUES (?,?,?)',('education-file','passed',datetime.now(timezone.utc).isoformat()))
-        # 필수 증빙: 신분증(본인 확인)·프로필 사진 통과 (두 회원 모두)
+        # 필수 증빙: 신분증(본인 확인)·프로필 사진·혼인관계 통과 (두 회원 모두)
         for mid in (M,N):
-            for kind in ('identity','photo'):
+            for kind in ('identity','photo','marital'):
                 self.sql.execute('INSERT INTO evidence_files VALUES (?,?,?)',(kind+'-'+mid[-4:],mid,kind))
                 self.sql.execute('INSERT INTO evidence_reviews VALUES (?,?,?)',(kind+'-'+mid[-4:],'passed','2026-01-01T00:00:00+00:00'))
     def execute(self,sql,params=()):
@@ -474,6 +474,8 @@ def test_opposite_gender_members_are_candidates_across_counselors(client):
     conn.execute("INSERT INTO evidence_reviews VALUES ('identity-x','passed','2026-01-01T00:00:00+00:00')")
     conn.execute("INSERT INTO evidence_files VALUES ('photo-x',%s,'photo')",(X,))
     conn.execute("INSERT INTO evidence_reviews VALUES ('photo-x','passed','2026-01-01T00:00:00+00:00')")
+    conn.execute("INSERT INTO evidence_files VALUES ('marital-x',%s,'marital')",(X,))
+    conn.execute("INSERT INTO evidence_reviews VALUES ('marital-x','passed','2026-01-01T00:00:00+00:00')")
     conn.execute('INSERT INTO assignments VALUES (%s,%s)',('11111111-1111-4111-8111-111111111104',X))
     r=tc.post('/api/internal/matching-directory',headers=headers('B'),json={})
     assert [i['member_id'] for i in r.json()['items']]==[N]          # B 성별 미입력 → 소개 관계만
@@ -493,7 +495,7 @@ def test_profile_photo_is_required_for_matching(client):
     """매칭 필수 조건에 프로필 사진 승인 추가: 사진이 반려(최신)되면 후보에서 빠지고 본인 조건 표시도 바뀐다."""
     tc,conn,_=client
     me=tc.post('/api/internal/matching-directory',headers=headers('B'),json={}).json()
-    assert me['self']['requirements']=={'identity':True,'education':True,'photo':True} and me['self']['eligible']
+    assert me['self']['requirements']=={'identity':True,'education':True,'photo':True,'marital':True} and me['self']['eligible']
     assert me['items'][0]['eligible'] and 'requirements' not in me['items'][0]
     conn.execute("INSERT INTO evidence_reviews VALUES ('photo-'||%s,'rejected','2026-02-01T00:00:00+00:00')",(N[-4:],))
     me=tc.post('/api/internal/matching-directory',headers=headers('B'),json={}).json()
@@ -514,3 +516,14 @@ def test_candidate_card_shows_member_introduction_without_contacts(client):
     assert card['introduction']=='소개글을 확인 중입니다.' and 'abc' not in str(card)
     conn.execute("UPDATE members SET introduction=NULL WHERE member_id=%s",(N,))
     assert tc.post('/api/internal/matching-directory',headers=headers('B'),json={}).json()['items'][0]['introduction']=='아직 소개글을 작성하지 않았습니다.'
+
+
+def test_marital_certificate_required_and_shown_on_card(client):
+    """혼인관계증명서 승인도 매칭 필수 조건이고, 직원이 확정한 상태가 후보 카드에 표시된다."""
+    tc,conn,_=client
+    conn.execute("INSERT INTO evidence_results (file_id,member_id,kind,summary) VALUES ('marital-'||%s,%s,'marital','혼인관계 확인: 미혼')",(N[-4:],N))
+    card=tc.post('/api/internal/matching-directory',headers=headers('B'),json={}).json()['items'][0]
+    assert card['marital_status']=='미혼' and card['eligible']
+    conn.execute("INSERT INTO evidence_reviews VALUES ('marital-'||%s,'rejected','2026-03-01T00:00:00+00:00')",(N[-4:],))
+    card=tc.post('/api/internal/matching-directory',headers=headers('B'),json={}).json()['items'][0]
+    assert card['marital_status'] is None and card['eligible'] is False
