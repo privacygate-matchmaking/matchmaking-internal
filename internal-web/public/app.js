@@ -140,6 +140,7 @@ const LOADERS = {
   evidence: loadReviews,
   approvals: loadApprovals,
   meetings: loadMeetings,
+  staff_signups: loadStaffSignups,
 };
 
 function selectView(name) {
@@ -864,4 +865,15 @@ async function matchingStaffApi(path, options = {}) {
   const res = await api(path, {method: options.method || "GET", ...(options.body !== undefined ? {json: options.body} : {})});
   if (!res.ok) throw new Error(await describe(res));
   return res.json();
+}
+
+
+async function loadStaffSignups() {
+  $("staff-signup-result").hidden = true;
+  await StaffSignupUI.renderAdmin({
+    root: $("staff-signup-panel"), api, describe,
+    toast: (text) => showResult($("staff-signup-result"), text, !/추적번호|실패|못했/.test(text)),
+    confirmAsk: async (text) => (await ask("직원 가입 신청 처리", text,
+      [{ label: "취소", value: "" }, { label: "확인", value: "ok", cls: "primary" }])) === "ok",
+  });
 }

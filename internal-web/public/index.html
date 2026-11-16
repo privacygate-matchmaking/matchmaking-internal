@@ -56,8 +56,10 @@
         <a class="primary wide" href="/auth/login">직원 로그인 <span aria-hidden="true">↗</span></a>
         <p id="login-msg" class="error" role="alert" hidden></p>
         <div class="login-help">회원 계정으로는 로그인할 수 없습니다.<br>업무가 끝나면 반드시 로그아웃하세요. 모든 접근은 기록됩니다.</div>
+        <div class="signup-entry"><span class="muted">새로 입사한 직원인가요?</span><button id="staff-signup-open" class="btn wide" type="button">직원 가입 신청</button></div>
       </div>
     </section>
+    <section id="staff-signup-view" class="signup-layout" hidden></section>
 
 
     <div id="app-view" hidden>
@@ -76,7 +78,14 @@
         <button type="button" class="tab" data-view="evidence"  data-roles="counselor,data_admin">회원·서류 조회·심사·승인</button>
         <button type="button" class="tab" data-view="approvals" data-roles="approver">소개 자료 발송 승인</button>
         <button type="button" class="tab" data-view="meetings" data-roles="counselor">매칭·동의·일정</button>
+        <button type="button" class="tab" data-view="staff_signups" data-roles="data_admin">직원 가입 승인</button>
       </nav>
+
+      <section class="view" data-view="staff_signups" data-title="직원 가입 승인" hidden>
+        <div class="page-heading"><div><span class="eyebrow">STAFF SIGN-UP REQUESTS</span><h1>직원 가입 승인</h1><p class="muted">직원 가입 신청을 확인하고 승인하거나 거절합니다. 승인하면 Keycloak 계정이 활성화되고 신청 역할(상담 직원·승인 담당자)과 직원 코드가 부여됩니다. 거절하면 계정과 신청 기록이 삭제됩니다. 승인 담당자 승인은 기존 승인 담당자에게도 알려집니다.</p></div></div>
+        <p id="staff-signup-result" class="result" hidden></p>
+        <div id="staff-signup-panel"></div>
+      </section>
 
       <section class="view" data-view="meetings" data-title="매칭·동의·일정" hidden>
         <div class="page-heading"><div><span class="eyebrow">MATCHING · CONSENT · MEETING</span><h1>매칭·동의·일정</h1><p class="muted">담당 회원의 매칭 목록입니다. '상세'를 누르면 공개 동의·자료 발송과 만남 일정을 봅니다. 일정은 두 회원이 직접 합의하고, 담당 직원은 합의된 일정을 승인만 합니다. 연락처는 자동 전달하지 않습니다.</p></div></div>
@@ -136,7 +145,7 @@
           <div><span class="small-label">심사 대기 서류</span><strong id="stat-evidence">—</strong></div>
         </div>
         <div class="content-layout"><div class="work">
-          <div class="section-title"><h2>회원 정보</h2><span class="muted"><span id="manage-count"></span> · 새 회원은 상담 직원에게 무작위로 배정됩니다</span></div>
+          <div class="section-title"><h2>회원 정보</h2><span class="muted"><span id="manage-count"></span> · 새 회원은 담당 회원이 가장 적은 상담 직원에게 배정됩니다</span></div>
           <div class="searchbar"><input type="search" id="manage-search" placeholder="회원 코드·이름·학력·직군·직장·담당 직원으로 검색" aria-label="회원 검색"></div>
           <div class="tablewrap">
             <table>
@@ -265,6 +274,7 @@
   </dialog>
   <script src="/meeting-staff.js"></script>
   <script src="/matching-staff.js"></script>
+  <script src="/staff-signup.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

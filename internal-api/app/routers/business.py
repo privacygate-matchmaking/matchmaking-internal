@@ -22,6 +22,7 @@ from privacygate.policy import STAFF_ROLES, Principal, Role
 from pydantic import BaseModel, Field
 
 from .. import audit, db, evidence_rules, inspection, jobs, notify, storage, transfer_client
+from . import member_notify
 from ..auth.session import member_token_via_transfer, member_via_transfer, require, require_csrf, require_service
 from ..config import get_settings
 
@@ -676,6 +677,7 @@ def review_evidence(file_id: uuid.UUID, body: ReviewIn, request: Request,
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                          (file_id, row["member_id"], row["kind"], json.dumps(facts, ensure_ascii=False),
                           evidence_rules.summary(row["kind"], facts), masked_key, masked_hash, masked_type, principal.user_id))
+        member_notify.evidence_reviewed(conn, row["member_id"], row["kind"], body.result)   # 회원 알림 (통과·반려)
     audit.allow(request, target_type="evidence", target_id=str(file_id))
     return {"file_id": str(file_id), "kind": row["kind"], "status": "reviewed", "review_result": body.result,
             "delete_after": _iso(delete_after)}
@@ -871,7 +873,10 @@ def _my_profile(conn, owner) -> dict:
     if photo:
         latest = {"status": photo["result"] or ("in_review" if photo["status"] == "in_review" else "submitted"),
                   "submitted_at": _iso(photo["created_at"])}
-    return {"height_cm": owner["height_cm"], "weight_kg": owner["weight_kg"],
+    user = conn.execute("SELECT display_name FROM users WHERE user_id = %s", (owner["user_id"],)).fetchone()
+    # 본인 화면 표시용 (외부 헤더·내 계정): 본인의 이름·로그인 아이디만
+    return {"name": owner["name"], "username": user["display_name"] if user else None,
+            "height_cm": owner["height_cm"], "weight_kg": owner["weight_kg"],
             "contact_phone": _mask_phone(owner["contact_phone"]), "contact_email": _mask_email(owner["contact_email"]),
             "photo": {"latest": latest, "approved_at": _iso(approved["created_at"]) if approved else None}}
 

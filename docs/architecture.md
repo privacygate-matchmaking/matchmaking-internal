@@ -58,9 +58,13 @@
 4. `sub`(= `user_id`)로 `users` 테이블을 조회해 활성 직원인지 확인하고 서버 세션을 만든다.
 5. 브라우저에는 무작위 세션 ID만 `internal_session` 쿠키(HttpOnly·Secure·SameSite=Strict)로 준다.
 
-직원·회원 모두 OTP 없이 ID·비밀번호로 로그인한다 (5회 실패 잠금·비밀번호 정책은 유지).
+직원·회원 모두 OTP 없이 ID·비밀번호로 로그인한다 (5회 실패 잠금·비밀번호 정책은 유지). 직원 로그인 화면(Keycloak 테마 `privacygate-staff`)은 회원 로그인과 같은 2단 구성(왼쪽 안내·오른쪽 로그인 카드)이며 색만 내부 화면의 남색·파랑이다.
+
+**직원 가입 신청 (총관리자 승인)**: internal-web 로그인 화면의 "직원 가입 신청" → internal-api `POST /api/staff-signups`(로그인 전, Origin 일치 + 접속 주소당 10분 5회·전체 30회). 신청 역할은 상담 직원·승인 담당자만(총관리자 불가). internal-api가 `internal-admin`으로 **비활성·업무 역할 없음** Keycloak 계정을 만들고 `staff_signups`에 기록, 총관리자에게 알린다. 총관리자(data_admin)가 "직원 가입 승인" 화면에서 승인하면 계정을 `counselors`·`approvers` 그룹에 넣고 활성화한 뒤 유효 역할이 신청 역할 하나인지 확인하고, DB 함수 `approve_staff_signup`(SECURITY DEFINER, 승인자가 활성 총관리자인지 재확인, 직원 코드 A-C03·A-P02 … 발급)으로 `users`에 등록한다. DB 등록이 실패하면 Keycloak을 다시 비활성·역할 없음으로 되돌린다. 거절하면 Keycloak 계정과 신청 기록을 지운다. 승인 담당자 승인은 기존 승인 담당자에게도 알려, 총관리자가 혼자 반출 승인 권한을 만드는 일이 드러나게 한다.
 
 회원은 external-api가 같은 방식(client `external-web`, 쿠키 `external_session`)으로 처리하고 ID·비밀번호만 쓴다.
+
+**회원가입 (이음 자체 가입 폼)**: Keycloak 자체 가입 화면은 끈 채로(`registrationAllowed=false`) 두고, external-web 가입 폼 → external-api `POST /api/signup` → transfer-api `POST /api/internal/member-signups` → internal-api `POST /api/internal/member-signups` 로 처리한다. 로그인 전 요청이라 세션·CSRF 토큰 대신 external-api가 Origin 일치와 요청 횟수(접속 주소당 10분 5회, 전체 10분 60회)를 확인하고, transfer-api·internal-api는 서비스 토큰만 받는다. internal-api가 입력(프로필 포함 전 항목 필수, 만 19세 이상, 휴대폰·이메일 형식, 개인정보 수집·이용 동의)을 검사한 뒤 `internal-admin`으로 Keycloak 계정을 만들고 `members` 그룹에 넣어 member 역할을 준다(역할 직접 부여 권한 없음, 생성 후 유효 역할이 member 하나인지 재확인). 이어 업무 DB 함수 `register_member`(SECURITY DEFINER)로 `users`·`members`를 저장하면 트리거가 담당 회원이 가장 적은 상담 직원을 배정·알림한다. DB 저장이 실패하면 방금 만든 Keycloak 계정을 지운다. 비밀번호는 Keycloak에만 저장하고 업무 DB·감사 로그·응답에 남기지 않는다.
 
 **인가 원칙**
 
@@ -81,6 +85,9 @@
 | transfer-api → internal-api `/api/internal/disclosure-checks` | transfer-api 서비스 토큰 (aud=internal-api) | azp=transfer-api |
 | external-api → transfer-api `/api/internal/*` | external-api 서비스 토큰 + 회원 access token | 두 토큰 모두 검증, 수신자 = 회원 토큰 sub |
 | transfer-api → internal-api `/api/evidence-files` | transfer-api 서비스 토큰 + 회원 access token (aud=internal-api) | 두 토큰 검증, 제출자 = 회원 토큰 sub, DB에서 활성 회원 확인 |
+| external-api → transfer-api → internal-api `/api/internal/member-signups` (회원가입) | 각 구간의 서비스 토큰만 (회원 토큰 없음) | azp=external-api / azp=transfer-api. internal-api가 입력 검사·계정 생성 |
+
+**회원 알림**: 외부 회원 화면 헤더에 종 아이콘(안 읽은 개수·읽음·삭제·누르면 해당 탭으로 이동)을 둔다. 알림은 직원 알림과 같은 `notifications` 테이블에 회원 user_id로 저장하고, 조회·읽음·삭제는 external-api `/api/me/notifications` → transfer-api `/api/internal/member-notifications` → internal-api `/api/internal/my-notifications`(회원 토큰 sub 기준 본인 것만). 매칭(신청·수락·거절·취소·종료)·만남 일정(제안·합의·다른 일정 요청·확정·반려)·정보 공개 승인·회수는 transfer-api가 업무 처리 뒤 internal-api `POST /api/internal/member-notification-events`(transfer-api 서비스 토큰만)로 **사건 종류와 대상 회원 id만** 보내고 문구는 internal-api가 정한다. 증빙·사진 심사 결과는 internal-api가 심사 처리 중에 직접 만든다. 문구에 상대 이름·연락처·회원 코드는 넣지 않으며, 알림 실패는 업무를 막지 않고 감사 로그(`notify_failed`)에만 남는다.
 
 **회원 증빙 제출 경로**: 회원 → external-web → external-api `POST /api/me/evidence-files` → transfer-api `POST /api/internal/evidence-submissions`(저장하지 않고 전달만) → internal-api `POST /api/evidence-files` → 암호화 후 evidence-storage. external-api는 업무 DB·증빙 저장소에 직접 닿지 않는다. 앞의 두 경로는 명세에 없어 추가했다.
 
@@ -111,6 +118,7 @@
 | internal-api | `POST /api/evidence-files` | transfer-api 서비스 + 회원 | 2주차 |
 | internal-api | `GET /api/evidence-files` (명세 외 추가: 배정된 증빙 목록), `GET /api/evidence-files/{file_id}/content`, `POST …/{file_id}/review` | data_admin | 2주차 |
 | internal-api | `POST /api/internal/disclosure-checks` | transfer-api 서비스 | 3주차 |
+| internal-api | `POST /api/staff-signups` (명세 외 추가: 직원 가입 신청) / `GET /api/staff-signups`, `POST …/{signup_id}/approve`·`reject` | 로그인 전(Origin·횟수 제한) / data_admin | 추가 |
 | internal-api | `GET /api/internal/my-evidence-files`, `GET·POST /api/internal/my-consents`, `POST /api/internal/my-consents/{consent_id}/revoke` (명세 외 추가) | transfer-api 서비스 + 회원 | 2~3주차 |
 | transfer-api | `POST /api/transfer-files`, `POST·GET /api/export-requests`, `GET /api/export-requests/{request_id}` | counselor(본인) / approver | 3주차 |
 | transfer-api | `POST …/{request_id}/approve`, `…/reject`, `POST /api/approvals/{approval_id}/revoke` | approver | 3주차 |
@@ -118,6 +126,8 @@
 | transfer-api | `POST·GET /api/internal/evidence-submissions`, `GET·POST /api/internal/member-consents`, `POST /api/internal/member-consents/{consent_id}/revoke` (명세 외 추가, 전달만) | external-api 서비스 + 회원 | 2~3주차 |
 | external-api | `GET /api/me/deliveries`, `GET /api/me/deliveries/{delivery_id}/download` | member | 3주차 |
 | external-api | `POST·GET /api/me/evidence-files`, `GET·POST /api/me/consents`, `POST /api/me/consents/{consent_id}/revoke` (명세 외 추가) | member | 2~3주차 |
+| external-api → transfer-api → internal-api | `GET /api/me/notifications`, `POST …/read`·`delete` → `/api/internal/member-notifications` → `/api/internal/my-notifications` (명세 외 추가: 회원 알림) / transfer-api → internal-api `POST /api/internal/member-notification-events` | member / 서비스 토큰 | 추가 |
+| external-api → transfer-api → internal-api | `POST /api/signup` → `POST /api/internal/member-signups` (명세 외 추가: 회원가입) | 로그인 전(Origin·횟수 제한) → 서비스 토큰 | 추가 |
 
 오류는 `{"error": {"code", "message", "trace_id"}}` 형식이다. 코드: AUTH_REQUIRED(401), ACCESS_DENIED·APPROVAL_MISMATCH·APPROVAL_EXPIRED·CONSENT_INVALID(403), NOT_FOUND(404), INVALID_STATE(409), INVALID_REQUEST(422), INTERNAL_ERROR(500). 판단 근거는 감사 로그에만 남긴다.
 
@@ -243,3 +253,10 @@ GitHub 조직 `privacygate-matchmaking`에 세 레포를 두고, 같은 상위 �
 | 공개 항목 조정: 이름 범위 추가(소개 상대 → 실명). 모든 항목은 직원 요청 + 승인자 승인 후에만 상대 화면에 표시(연락처는 일정 확정 + 상호 동의 추가) | 회원 동의만으로 정보가 노출되지 않게 승인 단계를 모든 항목에 적용하고, 승인된 결과는 회원이 쓰는 화면에서 바로 확인 |
 | 승인 담당자 목록·상세에 "자료 주인 → 받는 회원"과 제공 항목 표시 | 어떤 회원의 무엇을 내보내는지 알고 승인하도록 |
 | 최종 비교 시연 도구(`privacygate/infra/scripts/compare/`): 모드 전환, 브라우저 동일 요청 코드, 증거 수집, 비교 보고서 + Wazuh 규칙 100132(baseline 역할 검사 우회 허용 기록) | 응답·실제 파일·감사 로그·Wazuh 경보를 한 폴더에 남겨 baseline 과 enforce 를 같은 기준으로 비교 |
+| 회원가입: 이음 자체 가입 폼(외부) → external-api `/api/signup` → transfer-api → internal-api `/api/internal/member-signups`. Keycloak 계정은 `internal-admin` 이 만들고 `members` 그룹으로 member 역할 부여, 업무 DB 는 `register_member` 함수로만 저장 | Keycloak 자체 가입을 열지 않고 가입 정보 검사·저장·담당 배정을 내부가 최종 판단. 앱 계정에 users·members INSERT 권한을 주지 않고, 로그인 전 요청은 Origin·횟수 제한으로 보호 |
+| 담당자 자동 배정: 무작위 → 담당 회원(탈퇴 대기 제외)이 가장 적은 상담 직원(같으면 무작위) | 신규 회원을 상담 직원 사이에 고르게 나눔 |
+| 개인정보 수집·이용 동의 기록 `members.privacy_consent_version`·`privacy_consented_at` | 가입 시 어떤 동의 문구에 동의했는지 남김 (동의 없이는 가입 불가) |
+| 직원 가입 신청 → 총관리자 승인 (`staff_signups`, `approve_staff_signup`, Keycloak 그룹 `counselors`·`approvers`). 신청 역할은 상담·승인만, 승인 전 계정은 비활성·역할 없음, 거절 시 계정 삭제 | 신규 직원 계정을 운영자가 직접 만들지 않고도 통제된 절차로 발급. 승인 담당자 승인은 기존 승인 담당자에게 알려 직무 분리 약화를 드러냄 |
+| 직원 로그인 화면을 회원 로그인과 같은 2단 구성으로 변경 (테마 CSS·그림만) | 두 로그인 화면의 구조를 맞추고 색으로 내부/외부를 구분 |
+| 외부 헤더·"내 계정"에 로그인한 회원 이름 표시 (내부 `my-profile` 에 본인 `name`·`username` 추가) | 어떤 계정으로 로그인했는지 바로 확인. 본인 정보만 반환 |
+| 외부 회원 알림 (헤더 종 아이콘, `notifications` 테이블 공유, 중계는 사건 종류만 전달) | 매칭·일정·공개 승인·심사 결과를 회원이 놓치지 않게 함. 문구를 내부가 정해 중계가 임의 내용을 회원에게 보낼 수 없고, 상대 개인정보는 알림에 담지 않음 |

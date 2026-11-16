@@ -42,7 +42,15 @@ Keycloak client: `internal-web`, `external-web` · 쿠키: `internal_session`, `
 | GET | /api/internal/my-evidence-files | 서비스: transfer-api + 회원 토큰 | 내 증빙 심사 상태 (원본·심사자 정보 없음) ※명세 외 추가 |
 | GET | /api/internal/my-profile | 서비스: transfer-api + 회원 토큰 | 내 계정: 키·몸무게, 가린 연락처, 프로필 사진 검토 상태 ※명세 외 추가 |
 | PATCH | /api/internal/my-profile | 서비스: transfer-api + 회원 토큰 | 키(120~230)·몸무게(30~200)·휴대전화·이메일 변경 (보낸 항목만), 담당 직원 알림 ※명세 외 추가 |
+| POST | /api/internal/member-notification-events | 서비스: transfer-api 만 (회원 토큰 없음) | 회원 알림 사건 `{user_ids:[최대 2], kind}`. kind: match_requested·match_accepted·match_rejected·match_cancelled·match_ended·meeting_proposed·meeting_accepted·meeting_change_requested·meeting_confirmed·meeting_cancelled·release_approved·release_revoked. 문구는 내부가 정함, 활성 회원 계정에만 저장 ※명세 외 추가 |
+| GET | /api/internal/my-notifications | 서비스: transfer-api + 회원 토큰 | 내 알림 `{unread, items:[{notification_id, kind, title, body, link_view, created_at, read}]}` (최근 100건) ※명세 외 추가 |
+| POST | /api/internal/my-notifications/read · /delete | 서비스: transfer-api + 회원 토큰 | `{ids:[], all:false}` → 본인 알림만 읽음·삭제 ※명세 외 추가 |
 | GET | /api/internal/my-status | 서비스: transfer-api + 회원 토큰 (회원 행 없어도 됨) | 내 계정 상태·탈퇴 안내 문구. 외부 화면은 로그인 직후 호출 ※명세 외 추가 |
+| POST | /api/staff-signups | 로그인 전 (Origin 일치 + 접속 주소당 10분 5회·전체 30회) | 직원 가입 신청 `{username, password, name, email, requested_role: counselor\|approver}` → 201 `{status:"pending"}`. Keycloak 계정은 비활성·역할 없음 ※명세 외 추가 |
+| GET | /api/staff-signups | data_admin | 대기 중 가입 신청 목록 `{items:[{signup_id, username, name, email, requested_role, created_at}]}` ※명세 외 추가 |
+| POST | /api/staff-signups/{signup_id}/approve | data_admin + CSRF | 승인: Keycloak 활성화 + 역할 그룹, users 등록 → `{status:"approved", pseudo_id, role, username}` ※명세 외 추가 |
+| POST | /api/staff-signups/{signup_id}/reject | data_admin + CSRF | 거절: Keycloak 계정·신청 기록 삭제 → `{status:"rejected"}` ※명세 외 추가 |
+| POST | /api/internal/member-signups | 서비스: transfer-api 만 (회원 토큰 없음) | 회원가입: 입력 검사 → Keycloak 계정 생성(members 그룹) → `register_member` 로 회원 저장·담당 자동 배정. 실패 시 계정 되돌림 ※명세 외 추가 |
 | POST | /api/internal/my-withdrawal | 서비스: transfer-api + 회원 토큰 | 회원 본인 탈퇴 신청 (7일 유예) ※명세 외 추가 |
 | POST | /api/internal/my-withdrawal/cancel | 서비스: transfer-api + 회원 토큰 | 본인이 신청한 탈퇴만 철회 (직원 처리 건은 403) ※명세 외 추가 |
 | GET | /api/internal/my-consents | 서비스: transfer-api + 회원 토큰 | 내 동의 목록 ※명세 외 추가 |
@@ -82,6 +90,7 @@ Keycloak client: `internal-web`, `external-web` · 쿠키: `internal_session`, `
 | GET | /api/me/evidence-files | member | 내 증빙 심사 상태 ※명세 외 추가 |
 | GET·POST | /api/me/consents | member | 내 동의 목록·등록 ※명세 외 추가 |
 | POST | /api/me/consents/{consent_id}/revoke | member | 동의 철회 ※명세 외 추가 |
+| POST | /api/signup | 로그인 전 (Origin 일치 + 접속 주소당 10분 5회·전체 60회) | 회원가입 → 중계 `POST /api/internal/member-signups`(external-api 서비스 토큰) → 내부 ※명세 외 추가 |
 
 external-api 에는 업무 DB·증빙 저장소 접근 권한이 없다.
 
@@ -126,6 +135,19 @@ external-api 에는 업무 DB·증빙 저장소 접근 권한이 없다.
 | `POST /api/export-requests/{request_id}/approve` (중계) | `{}` → `{request_id, approval_id, delivery_id, expires_at}` |
 
 정상 승인 대상 소개 JSON 키: `member_pseudo_id`, `age_band`, `job_group`, `introduction` (각 1~300자). purpose 는 `introduction`, 동의 item 은 `profile`/`photo`/`contact` (소개 자료 반출은 profile).
+
+### 회원가입 요청·응답
+`POST /api/signup` (external-api), 중계·내부 `POST /api/internal/member-signups` 본문은 같다. 모든 항목 필수(프로필 포함), 정의되지 않은 필드는 422.
+```json
+{"username": "영문 소문자 시작 4~20자 [a-z0-9_]", "password": "12~64자, 아이디 포함 불가 (Keycloak 에만 저장)",
+ "name": "이름", "gender": "남|여", "birth_date": "YYYY-MM-DD (만 19세 이상)",
+ "contact_phone": "010-1234-5678", "contact_email": "이메일",
+ "education_level": "고졸|전문대졸|4년제 대졸|대학원졸", "job_group": "직군 (40자 이내)",
+ "height_cm": "120~230", "weight_kg": "30~200", "introduction": "300자 이내",
+ "privacy_consent": true, "consent_version": "2026-11"}
+```
+- 성공 201 → external `{"status": "registered"}` (회원 코드·담당자 등 내부 값은 돌려주지 않음).
+- 실패: 아이디·이메일 중복 409 INVALID_STATE "이미 사용 중인 아이디 또는 이메일입니다.", 형식·나이 422 INVALID_REQUEST(사유 문구 포함), 요청 횟수 초과 409, Origin 불일치 403.
 
 ## 상태 값
 - `scan_status`: pending / passed / blocked / error

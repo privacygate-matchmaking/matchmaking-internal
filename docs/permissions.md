@@ -3,7 +3,7 @@
 | 역할 | 시험 계정 | 할 수 있는 일 | 자동으로 주지 않는 권한 |
 |---|---|---|---|
 | counselor | `counselor_a` (내부 공격자 A), `counselor_b` | 담당 회원 조회·정보 수정·탈퇴 처리, 담당 회원 증빙 열람·심사, 반출 파일 업로드·신청(본인이 만든 내보내기 결과 등록 포함), 본인 신청 조회 | 전체 회원 내보내기, 증빙 제출·열람, 승인 |
-| data_admin (총관리자) | `data_admin` | 전체 회원 조회·정보 수정·탈퇴 처리, 전체 증빙 열람·심사, 전체 회원 내보내기·내역, 배정된 증빙 목록·열람·심사 | **반출 승인** |
+| data_admin (총관리자) | `data_admin` | 직원 가입 신청 승인·거절, 전체 회원 조회·정보 수정·탈퇴 처리, 전체 증빙 열람·심사, 전체 회원 내보내기·내역, 배정된 증빙 목록·열람·심사 | **반출 승인** |
 | approver | `approver` | 반출 신청 검토·승인·거절·회수 | **전체 내보내기, 원본 증빙 열람** |
 | member | `member_b` (외부 공범 B) | 본인 증빙 제출·심사 상태 확인, 매칭, 본인 동의 등록·철회, 본인 탈퇴 신청·철회, 나에게 온 전달 목록·다운로드 (외부 화면만) | 내부 화면 로그인, 증빙 원본 열람, 다른 회원 명의 동의 |
 | (Keycloak 운영) | `infra_admin` | Keycloak 관리 콘솔 | 업무 데이터 접근 |
@@ -22,12 +22,16 @@
   - 탈퇴 확정(삭제) 시 그 회원의 Keycloak 세션을 바로 끊고, 안내 기간(`MEMBER_NOTICE_DAYS`, 기본 30일) 동안 로그인하면 "탈퇴된 계정"(직원 처리면 사유 포함) 안내만 보인다. 기간이 지나면 Keycloak 계정도 삭제.
   - Keycloak 계정 삭제는 전용 client `internal-admin`(view-users·manage-users)으로만 하며, 삭제 전에 realm 역할이 member 뿐인지 확인한다 (직원 계정 삭제 불가).
 - 회원 간 매칭: 학력 증빙이 통과된 회원만 매칭을 누를 수 있다. 소개된 두 회원이 서로 매칭을 누르면 양쪽 프로필 제공 동의(30일)가 만들어진다. 매칭 취소·탈퇴 시 철회.
-- 새 회원은 활성 상담 직원 중 한 명에게 무작위로 배정된다 (DB 트리거). 상담 직원은 배정된 회원만, 총관리자는 전체 회원을 본다 (이름·연락처는 둘 다 화면에 없음).
+- 직원 가입 신청: 로그인 전 누구나 신청할 수 있지만(Origin·횟수 제한), 신청 역할은 상담·승인만이고 승인 전 Keycloak 계정은 비활성·역할 없음이다. 승인·거절은 총관리자(data_admin)만 하며, DB 등록은 `approve_staff_signup` 함수가 승인자가 활성 총관리자인지 다시 확인한 뒤에만 한다. 승인 담당자 승인은 기존 승인 담당자에게도 알림이 간다.
+- 회원 알림: 회원은 본인 알림만 조회·읽음·삭제한다(회원 토큰 sub 기준). 알림을 만드는 사건 경로는 transfer-api 서비스 토큰만 부를 수 있고, 사건 종류(kind) 목록 밖의 값이나 문구는 받지 않는다. 증빙 심사 결과 알림은 internal-api가 직접 만든다.
+- 회원가입: 외부 가입 폼에서 누구나 요청할 수 있다(로그인 전, Origin·횟수 제한). 만들어지는 계정은 항상 member 역할(Keycloak `members` 그룹)·활성 상태이며, 업무 DB 는 SECURITY DEFINER 함수 `register_member` 로만 저장한다(앱 계정에 users·members INSERT 권한 없음). 비밀번호는 Keycloak 에만 저장한다.
+- 새 회원은 활성 상담 직원 중 담당 회원(탈퇴 대기 제외)이 가장 적은 사람에게 배정된다 (같으면 무작위, DB 트리거). 상담 직원은 배정된 회원만, 총관리자는 전체 회원을 본다 (이름·연락처는 둘 다 화면에 없음).
 - 직원 승인과 회원 동의는 각각 확인한다. 반출 금지 자료는 승인으로도 허용되지 않는다.
 - 권한 선언이 없는 `/api` 경로가 있으면 서버가 시작하지 않는다 (`assert_all_routes_guarded`).
 - 서버 간 호출(`/api/internal/*`)은 Keycloak 서비스 토큰의 `azp` 로 호출자를 확인한다.
   - internal-api `/api/internal/disclosure-checks` ← `transfer-api`
   - internal-api `/api/evidence-files` ← `transfer-api` (+ 회원 access token, 회원 증빙 제출)
+  - internal-api `/api/internal/member-signups` ← `transfer-api` (회원 토큰 없음, 회원가입) / transfer-api 같은 경로 ← `external-api`
   - transfer-api `/api/internal/*` ← `external-api` (+ 회원 access token)
   - Keycloak 관리 API ← internal-api 의 `internal-admin` client (탈퇴 회원 세션 종료·계정 삭제만)
 
