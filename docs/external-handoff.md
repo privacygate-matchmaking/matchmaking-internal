@@ -206,3 +206,9 @@
 - 중계 `GET /api/internal/matching/candidates`: 진행 중·성사 상대 제외, 종료·거절·취소·만료 상대는 `category:"closed"` 로 맨 뒤(`last_status`, `closed_at`, `retry_at`). 외부 화면에 전체·새 매칭·매칭 취소 분류 버튼.
 - 중계 `POST /api/matching/requests/{match_id}/end`(상담 직원, `matching-staff-checks` action `end`), 알림 종류 `match_ended_by_staff` 추가.
 - 바뀐 외부 파일: `services/ieum/matching.py`(`pair_history`, `staff_end`), `matching_routes.py`, `meeting_routes.py`, `member_notify.py`, `external-web/public/matching.js`, `style.css`, 시험 `tests/integration/test_candidate_states.py`.
+
+### 프로필 사진 필수·상호 공개 (11월 16일)
+- 내부 매칭 자격(`ready`)에 프로필 사진 최신 심사 통과를 추가했습니다. `matching-directory` 의 `self` 에 `requirements` 를 추가(외부 `Person.requirements` 선택 필드).
+- 중계 `photo_ready`: 사진 범위는 상대도 같은 매칭에서 사진 제공 동의가 유효해야 요청·승인·다운로드됩니다. 개요 `photo_ready`, 회원 열람 `photo_pending`.
+- 외부 후보 탭에 "매칭 조건" 체크리스트와 규칙 안내.
+- 바뀐 외부 파일: `matching.py`(Person.requirements), `matching_routes.py`, `matching_release.py`, `external-web/public/matching.js`, `style.css`, 시험 `test_matching_release.py`.
