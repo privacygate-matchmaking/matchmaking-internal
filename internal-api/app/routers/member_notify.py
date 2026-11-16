@@ -27,6 +27,7 @@ EVENTS: dict[str, tuple[str, str, str]] = {
     "match_rejected": ("매칭 거절", "보낸 매칭 신청이 거절되었습니다.", "matches"),
     "match_cancelled": ("매칭 신청 취소", "받은 매칭 신청이 상대에 의해 취소되었습니다.", "matches"),
     "match_ended": ("매칭 종료", "소개 상대가 매칭을 종료했습니다. 공개 동의도 함께 종료되었습니다.", "matches"),
+    "match_ended_by_staff": ("매칭 종료", "담당 직원이 매칭을 종료했습니다. 공개 동의도 함께 종료되었고, 상대는 소개 후보에 다시 보일 수 있습니다.", "matches"),
     "meeting_proposed": ("새 만남 일정 제안", "소개 상대가 만남 일정을 제안했습니다. 매칭 현황에서 후보를 확인하세요.", "matches"),
     "meeting_accepted": ("만남 일정 합의", "소개 상대가 일정에 동의했습니다. 담당 직원 승인 후 확정됩니다.", "matches"),
     "meeting_change_requested": ("다른 일정 요청", "소개 상대가 다른 일정을 요청했습니다. 새 일정을 제안해 주세요.", "matches"),

@@ -49,6 +49,19 @@ window.StaffMatchingUI = (() => {
     const {api}=ctx;
     detail.hidden=false;
     detail.replaceChildren(el('h3',item.label||'담당 회원 매칭'),el('p',(states[item.status]||item.status)+' · 신청 '+date(item.created_at)));
+    if(item.status==='matched') {
+      // 두 회원 중 한쪽만 담당해도 종료할 수 있다. 종료하면 공개 동의·일정이 함께 끝나고 두 회원에게 알림이 간다
+      const endBox=el('div');endBox.className='row-between mt16';
+      const endNote=el('p','관계를 종료하면 공개 동의와 만남 일정이 함께 종료되고, 두 회원의 소개 후보 맨 뒤에 다시 표시됩니다.');endNote.className='muted';
+      const end=el('button','관계 종료');end.type='button';end.className='btn sm danger';
+      end.onclick=async()=>{
+        if(!confirm('이 매칭을 종료할까요? 공개 동의와 만남 일정이 함께 종료되고 되돌릴 수 없습니다.'))return;
+        end.disabled=true;
+        try{await api(`/api/matching/requests/${item.match_id}/end`,{method:'POST',body:{}});await render({...ctx,matchId:item.match_id});}
+        catch(error){endNote.textContent=error.message;end.disabled=false;}
+      };
+      endBox.append(endNote,end);detail.append(endBox);
+    }
     detail.append(el('h4','공개 동의·자료 발송'));
     if(!item.grants.length)detail.append(el('p','회원이 직접 설정한 공개 동의가 아직 없습니다. 매칭 수락은 공개 동의가 아닙니다.'));
     for(const g of item.grants) {

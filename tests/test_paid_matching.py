@@ -55,6 +55,9 @@ class Connection:
         for mid,who in ((M,B),(N,C)):
             self.sql.execute('INSERT INTO members VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
                 (mid,who,'active','ADMIN-ONLY-CODE','SECRET-NAME','1995-01-01','4년제 대졸',1,1,'연구','010-0000-0000','secret@example.test'))
+        # 성별·가입 시각 (기본 시험은 성별 없음 → 직원 소개 관계만으로 후보)
+        self.sql.execute('ALTER TABLE members ADD COLUMN gender TEXT')
+        self.sql.execute("ALTER TABLE members ADD COLUMN created_at TEXT DEFAULT '2026-01-01'")
         self.sql.executemany('INSERT INTO introductions VALUES (?,?)',[(M,N),(N,M)])
         self.sql.execute('INSERT INTO assignments VALUES (?,?)',(A,M))
         self.sql.execute('INSERT INTO evidence_files VALUES (?,?,?)',('education-file',N,'education'))
@@ -454,3 +457,27 @@ def test_member_detail_membership_fallback(monkeypatch):
     monkeypatch.setattr(biz.transfer_client,'call',lambda *a,**k:R())
     out=biz._membership(None,B)
     assert out['available'] and out['paid'] and out['wallet']['available']==3 and len(out['orders'])==5
+
+
+def test_opposite_gender_members_are_candidates_across_counselors(client):
+    """직원 소개 관계가 없어도 성별이 다른 회원은 후보가 된다 (담당 직원이 달라도)."""
+    tc,conn,_=client
+    X='bbbbbbbb-0000-4000-8000-000000000009';XU='22222222-2222-4222-8222-222222222209'
+    conn.execute("INSERT INTO users VALUES (%s,'A-009','member',1)",(XU,))
+    conn.execute("""INSERT INTO members (member_id,user_id,status,pseudo_id,name,birth_date,education_level,education_verified,
+        employment_verified,job_group,contact_phone,contact_email,gender) VALUES (%s,%s,'active','A-009','X','1994-01-01','4년제 대졸',1,0,'공공','-','-','여')""",(X,XU))
+    conn.execute("INSERT INTO evidence_files VALUES ('identity-x',%s,'identity')",(X,))
+    conn.execute("INSERT INTO evidence_reviews VALUES ('identity-x','passed','2026-01-01T00:00:00+00:00')")
+    conn.execute('INSERT INTO assignments VALUES (%s,%s)',('11111111-1111-4111-8111-111111111104',X))
+    r=tc.post('/api/internal/matching-directory',headers=headers('B'),json={})
+    assert [i['member_id'] for i in r.json()['items']]==[N]          # B 성별 미입력 → 소개 관계만
+    conn.execute("UPDATE members SET gender='남' WHERE member_id=%s",(M,))
+    items=tc.post('/api/internal/matching-directory',headers=headers('B'),json={}).json()['items']
+    assert {i['member_id'] for i in items}=={N,X}
+    conn.execute("UPDATE members SET gender='남' WHERE member_id=%s",(X,))
+    items=tc.post('/api/internal/matching-directory',headers=headers('B'),json={}).json()['items']
+    assert {i['member_id'] for i in items}=={N}                       # 같은 성별 → 후보 아님
+    conn.execute("UPDATE members SET gender='여' WHERE member_id=%s",(X,))
+    body={'participant_user_ids':[B,XU],'purpose':'meeting_schedule','action':'end'}
+    r=tc.post('/api/internal/matching-staff-checks',headers=headers('staff'),json=body)
+    assert r.status_code==200 and r.json()=={'allowed':True,'assigned_user_ids':[B]}   # 한쪽 담당이면 허용
