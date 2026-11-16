@@ -148,8 +148,16 @@ def get_member(member_id: uuid.UUID, request: Request,
                 WHERE c.member_id = %s ORDER BY c.granted_at DESC""",
             (member_id,)).fetchall()
         matches = []
+        # 심사를 통과한 증빙 결과 (종류별 최신 1건, 구간·여부 요약만)
+        verified = conn.execute(
+            """SELECT DISTINCT ON (kind) kind, summary, created_at FROM evidence_results
+                WHERE member_id = %s ORDER BY kind, created_at DESC""", (member_id,)).fetchall()
+        account = conn.execute("SELECT user_id FROM members WHERE member_id = %s", (member_id,)).fetchone()
     audit.allow(request, target_type="member", target_id=m["pseudo_id"])
     return {**_profile(m),
+            "verified_evidence": [{"kind": v["kind"], "summary": v["summary"], "reviewed_at": _iso(v["created_at"])}
+                                  for v in verified],
+            "membership": _membership(request, account["user_id"] if account else None),
             "consents": [{"consent_id": str(c["consent_id"]), "consent_label": f"C-{c['consent_no']}",
                           "item": c["item"], "purpose": c["purpose"],
                           "counterpart_pseudo_id": c["counterpart_pseudo_id"],
@@ -159,6 +167,22 @@ def get_member(member_id: uuid.UUID, request: Request,
                           "valid": c["revoked_at"] is None and c["expires_at"] > _now()}
                          for c in consents],
             "matches": matches}
+
+
+def _membership(request: Request, user_id) -> dict:
+    """유료(정회원) 여부·남은 매칭권·구매일 (중계 DB 의 이용권 기록). 실패해도 회원 상세는 보여 준다."""
+    if not user_id:
+        return {"available": False, "reason": "no_account"}
+    try:
+        resp = transfer_client.call(request, "GET", f"/api/matching/members/{user_id}/membership")
+    except GateError:
+        return {"available": False, "reason": "transfer_unreachable"}
+    if resp.status_code != 200:
+        return {"available": False, "reason": f"transfer_{resp.status_code}"}
+    data = resp.json()
+    return {"available": True, "paid": bool(data.get("paid")), "wallet": data.get("wallet") or {},
+            "plan": data.get("plan") or {},
+            "last_paid_at": data.get("last_paid_at"), "orders": (data.get("orders") or [])[:5]}
 
 
 class MemberUpdateIn(BaseModel):

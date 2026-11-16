@@ -111,7 +111,8 @@ def clean_photo(data: bytes) -> tuple[bytes, dict]:
         im.thumbnail((640, 640))
         buf = io.BytesIO()
         im.save(buf, "JPEG", quality=82, optimize=True)        # EXIF·위치 정보 없이 다시 저장
-    return buf.getvalue(), {"metadata_removed": had_exif, "width": im.width, "height": im.height}
+    # 항상 새로 저장하므로 메타데이터는 제거된 상태. had_metadata 는 원본에 EXIF(위치 등)가 있었는지
+    return buf.getvalue(), {"metadata_removed": True, "had_metadata": had_exif, "width": im.width, "height": im.height}
 
 
 def encode(data: bytes, media_type: str) -> dict:

@@ -8,7 +8,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from privacygate.errors import ErrorCode, GateError
 from privacygate.policy import Principal, Role
 from .. import audit, db, evidence_rules, storage, transfer_client
-from ..auth.session import member_via_transfer, staff_via_transfer, require, require_csrf, require_service
+from ..auth.session import member_via_transfer, staff_via_transfer, staff_or_admin_via_transfer, require, require_csrf, require_service
 from .business import _age, _iso, _public_label, _member_in_scope
 
 router=APIRouter(prefix='/api',tags=['paid-matching'])
@@ -166,6 +166,21 @@ def staff_check(body: StaffCheck,request: Request,staff: Principal=Depends(staff
     assigned=[str(r['user_id']) for r in rows]
     audit.allow(request,target_type='meeting_staff_check')
     return {'allowed':bool(assigned),'assigned_user_ids':assigned}
+
+
+class MemberScopeCheck(Strict):
+    user_id: uuid.UUID
+
+
+@router.post('/internal/member-scope-checks')
+def member_scope_check(body: MemberScopeCheck,request: Request,staff: Principal=Depends(staff_or_admin_via_transfer)):
+    """중계가 회원 이용권 정보를 직원에게 주기 전 확인: 총관리자이거나 그 회원의 담당 상담 직원인지."""
+    with db.connection() as conn:
+        row=conn.execute("""SELECT 1 FROM members m WHERE m.user_id=%s AND (%s='data_admin' OR EXISTS (
+            SELECT 1 FROM assignments a WHERE a.member_id=m.member_id AND a.user_id=%s))""",
+            (str(body.user_id),staff.role,staff.user_id)).fetchone()
+    audit.allow(request,target_type='member_scope_check',reason='allowed' if row else 'denied')
+    return {'allowed':bool(row)}
 
 
 class ReleaseCheck(Strict):

@@ -237,3 +237,15 @@ dialog.confirm textarea:focus{outline:0;border-color:var(--blue);box-shadow:0 0 
 .signup-card{margin-top:0}.signup-card .form .hint{font-size:11px;margin:4px 0 0}.signup-card .text-button{margin-top:10px}
 .signup-card select{appearance:auto}
 .signup-card .primary.wide{justify-content:center}
+/* 목록 페이지 나누기 (pager.js) */
+.pager{display:flex;align-items:center;justify-content:center;gap:4px;flex-wrap:wrap;margin:12px 0 4px}
+.pager button{min-width:32px;height:32px;padding:0 8px;border:1px solid var(--border);background:#fff;color:#4a5670;border-radius:6px;font-size:12px;cursor:pointer}
+.pager button:hover:not(:disabled){border-color:var(--blue);color:var(--blue)}
+.pager button.current{background:var(--navy);border-color:var(--navy);color:#fff;font-weight:600}
+.pager button:disabled{opacity:.4;cursor:default}
+.pager-gap{padding:0 4px;color:var(--muted)}
+.pager-info{margin-left:10px;font-size:11px;color:var(--muted)}
+.searchbar+.tablewrap{margin-top:10px}
+/* 회원 상세: 증빙 확인·이용권 */
+.facts .fact-verified{color:#17663a;font-weight:600}
+.facts .fact-note{color:var(--muted);font-size:11px}

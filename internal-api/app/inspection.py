@@ -5,6 +5,7 @@
 3) 추출 값(성명·생년월일·발급번호·금액 등)과 마스킹 사본은 암호화 저장소에만 두고, DB 에는 참/거짓 결과·건수만 남긴다.
 """
 import base64
+import uuid
 import hashlib
 import json
 import logging
@@ -62,9 +63,9 @@ def _checks(conn, kind: str, result: dict, member) -> tuple[str, dict]:
     return verdict, checks
 
 
-def _drop_blobs(row) -> None:
+def _drop_blobs(row, keep=frozenset()) -> None:
     for key in (row.get("fields_key"), row.get("masked_key")):
-        if key:
+        if key and key not in keep:
             try:
                 storage.delete(key)
             except Exception:
@@ -92,12 +93,14 @@ def run(file_id) -> dict:
         with db.connection() as conn:
             verdict, checks = _checks(conn, ev["kind"], result, ev)
         fields = {**(result.get("fields") or {}), "issue_no": (result.get("issue") or {}).get("number")}
-        fields_key = f"inspect/{file_id}.fields"
+        # 검사할 때마다 새 이름으로 저장한다. 같은 이름을 쓰면 아래에서 이전 검사 파일을 지울 때 새 파일까지 지워진다
+        run_id = uuid.uuid4().hex[:12]
+        fields_key = f"inspect/{file_id}-{run_id}.fields"
         storage.put(fields_key, json.dumps(fields, ensure_ascii=False).encode("utf-8"))
         masked = result.get("masked") or {}
         if masked.get("data_base64") and masked.get("media_type") in ("image/png", "image/jpeg"):
             blob = base64.b64decode(masked["data_base64"], validate=True)
-            masked_key, masked_type = f"inspect/{file_id}.masked", masked["media_type"]
+            masked_key, masked_type = f"inspect/{file_id}-{run_id}.masked", masked["media_type"]
             masked_hash = hashlib.sha256(blob).hexdigest()
             storage.put(masked_key, blob)
         status = "done"
@@ -112,7 +115,7 @@ def run(file_id) -> dict:
             (file_id, status, verdict, json.dumps(checks), json.dumps(detected), json.dumps(proposed, ensure_ascii=False),
              summary, fields_key, masked_key, masked_hash, masked_type, error, version))
     if old:
-        _drop_blobs(old)
+        _drop_blobs(old, keep={fields_key, masked_key})
     audit.writer().record(trace_id=hashlib.sha256(str(file_id).encode()).hexdigest()[:32], action="evidence_inspect",
                           result="allow" if status == "done" else "error", actor="system", target_type="evidence",
                           target_id=str(file_id), reason=verdict if status == "done" else (error or "failed")[:60])
