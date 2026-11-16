@@ -56,6 +56,7 @@ EXPECTED = {
     ("POST", "/api/internal/my-withdrawal"): "service:transfer-api",                  # 회원 본인 탈퇴 (명세 외 추가)
     ("POST", "/api/internal/my-withdrawal/cancel"): "service:transfer-api",
     ("GET", "/api/internal/my-profile"): "service:transfer-api",                     # 내 계정 정보 (명세 외 추가)
+    ("GET", "/api/internal/my-photo"): "service:transfer-api",                       # 내 프로필 사진 미리보기
     ("PATCH", "/api/internal/my-profile"): "service:transfer-api",                   # 키·몸무게·연락처 변경
     ("POST", "/api/transfer-files"): "roles:counselor",
     ("POST", "/api/export-requests"): "roles:counselor",
