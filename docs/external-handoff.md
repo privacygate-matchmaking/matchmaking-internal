@@ -175,3 +175,21 @@
 - **모든 항목은 승인 후에만 상대 화면에 보입니다.** 중계 profile 열람(`/api/internal/matching/requests/{id}/profile`)은 이제 값을 주지 않고 `consented_scopes`·`contact_pending`·`approval_required=true` 만 돌려줍니다. 외부 화면 "상대가 허용한 정보"는 이 매칭의 최신 승인 자료(`delivery-queries` 의 `match_id`)를 `MaterialUI.show(..., {compact:true})` 로 보여 줍니다.
 - 연락처는 기존대로 상호 연락처 동의 + 일정 확정(`contact_ready`)이 있어야 요청·승인·열람됩니다.
 - 바뀐 외부 파일: `matching.py`, `matching_routes.py`, `matching_release.py`, `transfer.py`(deliveries match_id), `matching.js`, `material.js`, 시험(`test_matching.py`, `test_matching_release.py`, `test_services.py`).
+
+### 회원가입 (11월 16일)
+- 로그인 카드 아래 **이음 회원가입** 버튼 → 가입 폼(`signup.js`). 모두 필수: 아이디·비밀번호(확인)·이름·성별·생년월일(만 19세 이상)·휴대폰·이메일·프로필(학력 수준·직군·키·몸무게·소개)·개인정보 수집·이용 동의.
+- 흐름: external-api `POST /api/signup`(세션 없음, Origin 확인 + 접속 주소당 10분 5회·전체 60회 제한) → 중계 `POST /api/internal/member-signups`(external-api 서비스 토큰만) → 내부 같은 경로. 계정 생성·회원 저장·담당 배정(담당 회원이 가장 적은 상담 직원)은 내부가 합니다. 가입 즉시 로그인할 수 있습니다.
+- 비밀번호는 요청 본문으로만 지나가며 외부·중계 감사 로그와 응답에 남기지 않습니다. 응답은 `{status:"registered"}` 뿐입니다.
+- 바뀐 외부 파일: `services/ieum/member_signup.py`(새 파일: 모델·제한·BFF·중계), `external.py`·`transfer.py`(등록 2줄씩), `external-web/public/signup.js`(새 파일), `index.html`(버튼·화면·스크립트), `style.css`, 시험(`test_member_signup.py`, `signup.test.cjs`, `test_services.py` 목 응답).
+
+### 로그인한 회원 이름 표시 (11월 16일)
+- 내부 `GET /api/internal/my-profile` 응답에 본인 `name`(이름)·`username`(로그인 아이디)을 추가했습니다(중계 `/api/internal/member-profile`, BFF `/api/me/profile` 은 그대로 전달).
+- 외부 헤더의 "회원 라운지" 자리에 "김가온 님"처럼 이름을 표시하고(불러오지 못하면 기존 문구), "내 계정" 맨 위에 이름·로그인 아이디를 보여 줍니다.
+- 바뀐 외부 파일: `external-web/public/app.js`(showMemberName), `account.js`(계정 카드).
+
+### 회원 알림 (11월 16일)
+- 외부 헤더에 종 아이콘을 추가했습니다(`external-web/public/notify.js`, `index.html`, `app.js`, `style.css`). 30초마다 새로 읽고, 누르면 `link_view` 탭(matches·evidence·deliveries·account)으로 이동합니다.
+- 경로: BFF `GET /api/me/notifications`, `POST /api/me/notifications/read|delete`(CSRF) → 중계 `/api/internal/member-notifications`(+ `/read`, `/delete`, 회원 토큰) → 내부 `/api/internal/my-notifications`.
+- 중계 → 내부 `POST /api/internal/member-notification-events` 는 사건 종류와 대상 회원 id만 보냅니다(`services/ieum/member_notify.py` 의 `notifier`). 연결 위치: `matching_routes.py`(신청·결정), `meeting_routes.py`(제안·응답·확정·반려), `transfer.py`(공개 승인·회수). 실패해도 업무 응답은 그대로이고 감사 로그에 `notify_failed:<kind>` 가 남습니다.
+- 증빙·사진 심사 결과 알림은 내부가 직접 만듭니다(외부 변경 없음).
+- 시험: `tests/integration/test_member_notify.py`, `test_services.py` 목 응답.

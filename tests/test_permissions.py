@@ -251,6 +251,7 @@ class Permissions(unittest.TestCase):
         try:
             with self.as_member(MEMBER_B) as c:
                 p = c.get("/api/internal/my-profile").json()
+                self.assertEqual((p["name"], p["username"]), ("박도윤", "member_b"))   # 본인 이름·아이디 (헤더 표시용)
                 if orig["contact_phone"]:
                     self.assertNotEqual(p["contact_phone"], orig["contact_phone"])   # 가린 값만
                     self.assertIn("*", p["contact_phone"])

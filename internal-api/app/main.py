@@ -8,7 +8,7 @@ from privacygate.web import assert_all_routes_guarded, install
 
 from . import audit, db, jobs
 from .config import get_settings
-from .routers import auth, business, transfer, matching
+from .routers import auth, business, transfer, matching, signup, staff_signup, member_notify
 
 logging.basicConfig(level=logging.INFO)
 
@@ -34,6 +34,9 @@ app.include_router(auth.router)
 app.include_router(business.router)
 app.include_router(transfer.router)
 app.include_router(matching.router)
+app.include_router(signup.router)
+app.include_router(staff_signup.router)
+app.include_router(member_notify.router)
 
 
 @app.get("/health", include_in_schema=False)
