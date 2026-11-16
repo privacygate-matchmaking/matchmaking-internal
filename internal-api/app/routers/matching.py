@@ -9,7 +9,7 @@ from privacygate.errors import ErrorCode, GateError
 from privacygate.policy import Principal, Role
 from .. import audit, db, evidence_rules, storage, transfer_client
 from ..auth.session import member_via_transfer, staff_via_transfer, staff_or_admin_via_transfer, require, require_csrf, require_service
-from .business import _age, _iso, _public_label, _member_in_scope
+from .business import _age, _iso, _public_label, _member_in_scope, contact_like
 
 router=APIRouter(prefix='/api',tags=['paid-matching'])
 
@@ -63,12 +63,20 @@ def related(conn,member_id,counterpart_id):
         (str(counterpart_id),str(member_id))).fetchone() is not None
 
 
+def intro_text(row):
+    """후보 카드에 보이는 회원 본인의 소개글. 연락 수단이 섞여 있으면 보여 주지 않는다 (예전 자료 대비)."""
+    text=' '.join((row['introduction'] or '').split())[:300]
+    if not text:return '아직 소개글을 작성하지 않았습니다.'
+    if contact_like(text):return '소개글을 확인 중입니다.'
+    return text
+
+
 def directory_card(row,eligible):
     age=_age(row['birth_date'])
     return {'member_id':str(row['member_id']),'user_id':str(row['user_id']),
         'pseudo_id':_public_label(row['birth_date'],row['education_level'])[:40],
         'age_band':f'만 {age}세' if age is not None else '비공개',
-        'job_group':'비공개','introduction':'직원이 소개한 회원입니다. 상세 자료는 별도 공개 동의 후 확인합니다.',
+        'job_group':'비공개','introduction':intro_text(row),
         'eligible':bool(eligible)}
 
 

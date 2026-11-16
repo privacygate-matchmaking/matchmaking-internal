@@ -880,6 +880,17 @@ def cancel_match(counterpart_member_id: uuid.UUID, request: Request,
 # 연락처는 여기서 등록·변경만 하고, 상대에게 주는 것은 매칭 공개 동의 + 일정 확정 + 직원 요청 + 승인자 승인 절차뿐이다.
 # ======================================================================
 _PHONE = re.compile(r"^01[016789]-?\d{3,4}-?\d{4}$")
+# 소개글에 연락 수단을 적어 승인 절차 없이 연락처를 넘기는 것을 막는다 (전화번호·이메일·링크·메신저 아이디)
+_CONTACT_LIKE = re.compile(
+    r"((?<!\d)0\d{1,2}[\s.\-]?\d{3,4}[\s.\-]?\d{4}(?!\d))|(\d{9,})|([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})"
+    r"|(https?://|www\.|\.com\b|\.kr\b|\.net\b)"
+    r"|(카톡|카카오톡|오픈채팅|오픈톡|인스타|텔레그램|라인\s*아이디|디엠)"
+    r"|(\b(?:kakao(?:talk)?|instagram|insta|telegram|line\s*id|dm)\b)",
+    re.IGNORECASE)
+
+
+def contact_like(text: str | None) -> bool:
+    return bool(text) and bool(_CONTACT_LIKE.search(text))
 _EMAIL = re.compile(r"^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,120}\.[A-Za-z]{2,24}$")
 
 
@@ -910,7 +921,7 @@ def _my_profile(conn, owner) -> dict:
     user = conn.execute("SELECT display_name FROM users WHERE user_id = %s", (owner["user_id"],)).fetchone()
     # 본인 화면 표시용 (외부 헤더·내 계정): 본인의 이름·로그인 아이디만
     return {"name": owner["name"], "username": user["display_name"] if user else None,
-            "height_cm": owner["height_cm"], "weight_kg": owner["weight_kg"],
+            "height_cm": owner["height_cm"], "weight_kg": owner["weight_kg"], "introduction": owner["introduction"],
             "contact_phone": _mask_phone(owner["contact_phone"]), "contact_email": _mask_email(owner["contact_email"]),
             "photo": {"latest": latest, "approved_at": _iso(approved["created_at"]) if approved else None}}
 
@@ -931,6 +942,7 @@ class MyProfileIn(BaseModel):
     weight_kg: int | None = Field(default=None, ge=30, le=200)
     contact_phone: str | None = Field(default=None, max_length=20)
     contact_email: str | None = Field(default=None, max_length=200)
+    introduction: str | None = Field(default=None, max_length=300)
 
 
 @router.get("/internal/my-photo")
@@ -963,7 +975,7 @@ def my_photo(request: Request, which: str = "approved", member: Principal = Depe
 
 @router.patch("/internal/my-profile")
 def update_my_profile(body: MyProfileIn, request: Request, member: Principal = Depends(member_via_transfer)):
-    """키·몸무게·연락처 변경 (보낸 항목만). 변경 내용 값은 알림·감사 로그에 남기지 않는다. ※ 명세 외 추가"""
+    """키·몸무게·연락처·소개글 변경 (보낸 항목만). 변경 내용 값은 알림·감사 로그에 남기지 않는다. ※ 명세 외 추가"""
     owner = _member_of(member.user_id)
     sent = body.model_dump(exclude_unset=True)
     changes: dict = {}
@@ -981,13 +993,22 @@ def update_my_profile(body: MyProfileIn, request: Request, member: Principal = D
         if email and not _EMAIL.match(email):
             raise GateError(ErrorCode.INVALID_REQUEST, "email_invalid", message="이메일 형식을 확인하세요.")
         changes["contact_email"] = email or None
+    if "introduction" in sent and sent["introduction"] is not None:
+        intro = " ".join(sent["introduction"].split())
+        if len(intro) < 10:
+            raise GateError(ErrorCode.INVALID_REQUEST, "introduction_too_short", message="소개글은 10자 이상 입력하세요.")
+        if contact_like(intro):
+            raise GateError(ErrorCode.INVALID_REQUEST, "introduction_contact",
+                            message="소개글에는 전화번호·이메일·링크·메신저 아이디를 쓸 수 없습니다. 연락처는 매칭 후 승인 절차로만 전달됩니다.")
+        changes["introduction"] = intro
     if not changes:
         raise GateError(ErrorCode.INVALID_REQUEST, "nothing_to_update", message="변경할 항목을 입력하세요.")
     sets = ", ".join(f"{c} = %({c})s" for c in changes)
     with db.connection() as conn:
         conn.execute(f"UPDATE members SET {sets} WHERE member_id = %(mid)s AND status = 'active'",
                      {**changes, "mid": owner["member_id"]})
-        labels = [x for x, keys in (("키·몸무게", ("height_cm", "weight_kg")), ("연락처", ("contact_phone", "contact_email")))
+        labels = [x for x, keys in (("키·몸무게", ("height_cm", "weight_kg")), ("연락처", ("contact_phone", "contact_email")),
+                                    ("소개글", ("introduction",)))
                   if any(k in changes for k in keys)]
         text = f"{notify.member_label(conn, owner['member_id'])} 회원이 {'·'.join(labels)}을(를) 직접 변경했습니다."
         notify.to_counselors_of(conn, owner["member_id"], "member_profile_changed", "회원 정보 변경", text, "members")

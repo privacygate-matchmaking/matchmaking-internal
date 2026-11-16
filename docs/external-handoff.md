@@ -212,3 +212,8 @@
 - 중계 `photo_ready`: 사진 범위는 상대도 같은 매칭에서 사진 제공 동의가 유효해야 요청·승인·다운로드됩니다. 개요 `photo_ready`, 회원 열람 `photo_pending`.
 - 외부 후보 탭에 "매칭 조건" 체크리스트와 규칙 안내.
 - 바뀐 외부 파일: `matching.py`(Person.requirements), `matching_routes.py`, `matching_release.py`, `external-web/public/matching.js`, `style.css`, 시험 `test_matching_release.py`.
+
+### 회원 소개글 (11월 16일)
+- 내 계정에 소개글 수정 칸(10~300자). 외부 BFF `PATCH /api/me/profile` 의 `ProfileUpdate` 에 `introduction` 추가(검사는 내부: 연락 수단 금지).
+- 후보 카드 `introduction` 이 회원 소개글이 되었고, "직원이 소개한 회원입니다…" 문구는 화면에서 작은 회색 안내로 표시합니다.
+- 바뀐 외부 파일: `services/ieum/member_account.py`, `external-web/public/account.js`, `matching.js`, `style.css`.
