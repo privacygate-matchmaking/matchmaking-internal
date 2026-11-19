@@ -252,3 +252,16 @@ def set_account_enabled(user_id: str, enabled: bool) -> str:
             if resp.status_code not in (204, 404):
                 raise KeycloakAdminError("logout_failed")
     return "done"
+
+
+# Keycloak 이벤트 수집(keycloak_events.py)용 공개 도우미
+def admin_client() -> httpx.Client:
+    return _client()
+
+
+def realm_base() -> str:
+    return _base()
+
+
+def client_id() -> str:
+    return get_settings().kc_admin_client_id

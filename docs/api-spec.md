@@ -69,6 +69,12 @@ Keycloak client: `internal-web`, `external-web` · 쿠키: `internal_session`, `
 - 사건·잠금 처리 실패는 차단 결정을 바꾸지 않는다 (거부 응답은 그대로). 감사 로그 파일(Wazuh 수집)·감사 DB 기록이 실패해도 차단·잠금은 동작한다.
 - 감사 로그: `security.auto_lock`, `security.unlock` · `security.suspend_account` · `security.restore_account` · `security.revoke_deliveries`, `security.incident_status`, 중계 `security.report`. Wazuh 규칙 100150~100153.
 
+## 감사 로그 공통 형식·위변조 방지 (보안 강화)
+- 모든 서비스(내부·외부·중계)가 privacygate `AuditWriter` 로 같은 형식을 쓴다: `ts, service, trace_id, actor, role, action, target_type, target_id, result, reason, policy_version` + 자료 제공 시 `owner_id, recipient_id, consent_id, approval_id, file_id, file_hash`. 비밀번호·세션·토큰 원문·주민번호·연락처는 필드가 없어 기록할 수 없다.
+- JSON 파일 각 줄에 `seq, prev_hash, hash` (SHA-256 해시 체인). `infra/scripts/audit-verify.sh` 가 수정·삭제·순서 변경·누락을 찾아 `audit-verifier.json` 에 결과를 남긴다 (Wazuh 100160·100161). 파일은 0640.
+- DB `audit_log` (업무·중계): 앱 계정은 INSERT 만, 트리거로 DB 소유자도 UPDATE·DELETE·TRUNCATE 불가. 보관기간(365일 이상) 지난 행만 `SELECT purge_audit_log(365)` (운영자).
+- Keycloak 로그인 실패·직원 로그인·역할/그룹 변경 이벤트를 internal-api 가 30초마다 읽어 같은 형식(`keycloak.*`)으로 남긴다 (Wazuh 100180~100183). IP·비밀번호는 남기지 않는다.
+
 ## 중계 (transfer-api)
 내부 직원 화면은 internal-api 를 거쳐 호출한다 (internal-api 가 1차 역할 확인 후, 서버에 보관한 사용자 access token 을 붙여 전달).
 
@@ -82,7 +88,8 @@ Keycloak client: `internal-web`, `external-web` · 쿠키: `internal_session`, `
 | POST | /api/export-requests/{request_id}/reject | approver | 거절 |
 | POST | /api/approvals/{approval_id}/revoke | approver | 승인 회수 |
 | POST | /api/internal/delivery-queries | 서비스: external-api + 회원 토큰 | 회원에게 온 전달 목록 |
-| GET | /api/internal/deliveries/{delivery_id}/download | 서비스: external-api + 회원 토큰 | 승인 파일 다운로드 |
+| POST | /api/internal/deliveries/{delivery_id}/download-tokens | 서비스: external-api + 회원 토큰 | 일회용 다운로드 토큰 발급 `{token, expires_in, required}` — 다운로드와 같은 판단(수신자·승인·회수·동의·만료·파일 ID/버전/해시·검사·횟수)을 먼저 하고, 원문은 응답에만·DB 에는 SHA-256 만. 같은 제공 건의 이전 미사용 토큰은 폐기 ※보안 강화 |
+| GET | /api/internal/deliveries/{delivery_id}/download | 서비스: external-api + 회원 토큰 (+ `X-Download-Token`) | 승인 파일 다운로드. enforce 는 토큰 필수(60초·1회, 재사용 403 `download_token_used`), 제공 건당 최대 5회(`download_limit_reached`). 승인 외 file_id 요청은 토큰과 무관하게 먼저 `requested_file_not_approved` |
 | POST | /api/internal/evidence-submissions | 서비스: external-api + 회원 토큰 | 회원 증빙을 internal-api 로 전달만 (중계에 저장 안 함) ※명세 외 추가 |
 | GET | /api/internal/evidence-submissions | 서비스: external-api + 회원 토큰 | 내 증빙 심사 상태 전달 ※명세 외 추가 |
 | GET·POST | /api/internal/member-consents | 서비스: external-api + 회원 토큰 | 내 동의 목록·등록 전달 ※명세 외 추가 |
@@ -99,7 +106,8 @@ Keycloak client: `internal-web`, `external-web` · 쿠키: `internal_session`, `
 | 메서드 | 경로 | 허용 | 설명 |
 |---|---|---|---|
 | GET | /api/me/deliveries | member | 나에게 온 전달 목록 (transfer-api 경유) |
-| GET | /api/me/deliveries/{delivery_id}/download | member | 승인 파일 다운로드 (transfer-api 경유) |
+| POST | /api/me/deliveries/{delivery_id}/download-token | member + CSRF | 일회용 다운로드 토큰 받기 (transfer-api 경유) ※보안 강화 |
+| GET | /api/me/deliveries/{delivery_id}/download | member (+ `X-Download-Token`) | 승인 파일 다운로드 (transfer-api 경유). 토큰은 주소가 아니라 헤더로만 보낸다 |
 | POST | /api/me/evidence-files | member | 증빙 제출 (transfer-api → internal-api 경유) ※명세 외 추가 |
 | GET | /api/me/evidence-files | member | 내 증빙 심사 상태 ※명세 외 추가 |
 | GET·POST | /api/me/consents | member | 내 동의 목록·등록 ※명세 외 추가 |

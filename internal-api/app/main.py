@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from privacygate import gate_mode
 from privacygate.web import assert_all_routes_guarded, install
 
-from . import audit, db, jobs, security
+from . import audit, db, jobs, keycloak_events, security
 from .config import get_settings
 from .routers import auth, business, transfer, matching, signup, staff_signup, member_notify
 from .routers import security as security_routes
@@ -22,8 +22,10 @@ if gate_mode.is_baseline():
 async def lifespan(app: FastAPI):
     db.open_pool(get_settings().database_url)
     jobs.start()
+    keycloak_events.start()   # Keycloak 로그인 실패·역할 변경 → 감사 로그(→ Wazuh)
     yield
     jobs.stop()
+    keycloak_events.stop()
     db.close_pool()
 
 
