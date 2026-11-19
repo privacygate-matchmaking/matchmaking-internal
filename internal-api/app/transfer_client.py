@@ -15,6 +15,9 @@ from privacygate.errors import ErrorCode, GateError
 from . import db
 from .auth import oidc
 from .config import get_settings
+from privacygate import mtls
+
+_MTLS = mtls.client_options()   # compose.mtls.yaml 을 켜면 transfer-api 에 클라이언트 인증서를 낸다
 
 _SKEW = 30
 
@@ -53,7 +56,7 @@ def call(request: Request, method: str, path: str, *, json: dict | None = None,
                "X-Trace-Id": request.state.trace_id}
     try:
         return httpx.request(method, f"{get_settings().transfer_api_url}{path}", headers=headers,
-                             json=json, params=params, files=files, timeout=15)
+                             json=json, params=params, files=files, timeout=15, **_MTLS)
     except httpx.HTTPError as exc:
         raise GateError(ErrorCode.INTERNAL_ERROR, "transfer_unreachable") from exc
 
