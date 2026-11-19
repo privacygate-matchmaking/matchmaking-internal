@@ -6,9 +6,10 @@ from fastapi import FastAPI
 from privacygate import gate_mode
 from privacygate.web import assert_all_routes_guarded, install
 
-from . import audit, db, jobs
+from . import audit, db, jobs, security
 from .config import get_settings
 from .routers import auth, business, transfer, matching, signup, staff_signup, member_notify
+from .routers import security as security_routes
 
 logging.basicConfig(level=logging.INFO)
 
@@ -28,7 +29,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="internal-api", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
-install(app, audit.writer())
+install(app, audit.writer(), on_deny=security.on_deny)   # 거부 후 사후 대응 (반복 거부 잠금·사건 기록)
 
 app.include_router(auth.router)
 app.include_router(business.router)
@@ -37,6 +38,7 @@ app.include_router(matching.router)
 app.include_router(signup.router)
 app.include_router(staff_signup.router)
 app.include_router(member_notify.router)
+app.include_router(security_routes.router)
 
 
 @app.get("/health", include_in_schema=False)

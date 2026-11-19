@@ -24,6 +24,7 @@ os.environ["AUDIT_LOG_PATH"] = "/tmp/test-permissions-audit.json"   # 시험 기
 sys.path.insert(0, os.getcwd())                                       # 컨테이너 /srv (app 패키지)
 
 try:
+    from fastapi import Request
     from fastapi.testclient import TestClient
 except ImportError:
     TestClient = None
@@ -72,6 +73,14 @@ class Permissions(unittest.TestCase):
         cls.app.dependency_overrides.clear()
         with cls.db.connection() as conn:     # 시험 중 생긴 알림 정리
             conn.execute("DELETE FROM notifications WHERE created_at >= %s", (cls.started,))
+        try:   # 역할 밖 요청 시험이 남긴 거부 신호·자동 잠금 정리 (upgrade/014 적용 DB)
+            with cls.db.connection() as conn:
+                conn.execute("DELETE FROM account_locks WHERE created_at >= %s", (cls.started,))
+                conn.execute("DELETE FROM security_signals WHERE created_at >= %s", (cls.started,))
+                conn.execute("""UPDATE security_incidents SET status = 'false_positive', note = '자동 시험 (test_permissions)'
+                                 WHERE first_seen_at >= %s""", (cls.started,))
+        except Exception:
+            pass
         cls.db.close_pool()
 
     @classmethod
@@ -84,7 +93,14 @@ class Permissions(unittest.TestCase):
     def as_staff(self, user_id):
         pseudo, role = STAFF[user_id]
         p = self.Principal(user_id=user_id, pseudo_id=pseudo, role=role)
-        self.app.dependency_overrides[self.session.current_principal] = lambda: p
+
+        def principal(request: Request):
+            # 로그인 세션이 없는 시험 요청: 중계 호출(이용권 조회 등)은 unknown_session 으로 실패 처리되고 화면 값만 비운다
+            request.state.principal = p
+            request.state.session_hash = b"test-no-session"
+            request.state.csrf_token = "test"
+            return p
+        self.app.dependency_overrides[self.session.current_principal] = principal
         try:
             yield self.client
         finally:

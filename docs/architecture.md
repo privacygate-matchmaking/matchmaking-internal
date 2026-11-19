@@ -103,6 +103,17 @@
 
 전체 회원 내보내기 결과 파일은 서버 내부에만 두고 `export_id`와 건수만 응답한다. 브라우저로 내려받는 경로는 두지 않는다.
 
+**사후 대응(차단 이후)**: 막는 데서 끝내지 않고 같은 계정의 재시도를 끊는다.
+
+| 상황 | 자동 대응 | 총관리자 대응 (보안 사건 화면) |
+| --- | --- | --- |
+| ① 상담 직원의 관리자 내보내기 시도 | 첫 시도부터 보안 사건(차단됨), 60초 안 3번이면 15분 자동 임시 잠금 → 그 계정의 모든 업무 API 403 | 잠금 해제(업무 착오), 계정 정지(users.active=false + 세션 삭제 + Keycloak 비활성·세션 종료), 복구 |
+| ② 회원의 승인 외 자료 요청 | 중계가 내부에 사건을 알림(회원 토큰으로 대상 확인), 60초 안 3번이면 15분 잠금 → 중계가 회원 기능 차단 | 계정 정지·복구, 그 회원이 받은 승인 자료 일괄 회수 |
+| 역할 밖 요청 반복 | 60초 3번 → 15분 잠금 + 사건 | 위와 같음 |
+| baseline 에서 통과한 ①② | 막지 못했으므로 '차단 안 됨' 사건으로 남기고 총관리자에게 알림 | 사후 조사·조치 |
+
+잠금·사건 처리는 차단 결정과 분리되어 있다 (처리 실패가 거부 응답을 바꾸지 않음). Wazuh 가 멈추거나 감사 파일 쓰기가 실패해도 차단·잠금은 API 서버 안에서 동작하며, Wazuh 는 탐지·경보(100150 자동 잠금, 100151 잠긴 계정 요청, 100152 총관리자 조치)를 맡는다.
+
 서버 간 호출은 서비스 토큰 검증에 성공한 요청에 한해 받은 trace_id를 이어 써서 외부 → 중계 → 내부 로그를 하나로 잇는다. 모든 거부는 trace_id·가명 ID·경로·사유 코드로 JSON 로그에 남고, Wazuh 규칙이 공격 ①②와 같은 계정의 반복 거부(1분 3회)를 경보한다. 차단 여부는 경보가 아니라 API 응답과 파일 상태로 판단한다.
 
 ## 6. API 목록
@@ -146,6 +157,7 @@
 | matchmaking_business | `login_flows`, `sessions`(세션 ID 해시, CSRF, 토큰은 서버만 보관) | 읽기·쓰기·삭제 |
 | matchmaking_transfer | `transfer_files`(file_id, file_version, file_hash, scan_status), `export_requests`(request_id, requester_id, recipient_id, purpose, consent_id, request_status, expires_at) | 읽기·쓰기 |
 | matchmaking_transfer | `approvals`(approval_id, approver_id ≠ 신청자, 승인 파일 고정), `deliveries`(delivery_id, recipient_id) | 읽기·쓰기 |
+| matchmaking_business | `security_incidents`(사건 종류·대상 코드·사유 코드·차단 여부·횟수·자동 잠금·검토 상태), `incident_actions`(조치 기록), `account_locks`(임시 잠금), `security_signals`(거부 신호, 60초 집계용) — 이름·연락처 없음 | 사건: 읽기·추가·수정(삭제 불가), 잠금·신호: 읽기·쓰기·삭제, `users.active` 는 함수 `set_account_active` 로만 |
 | 두 DB | `audit_log` (trace_id 기준) | 추가만 |
 | evidence-storage | 증빙 암호문 | internal-api만 마운트 |
 | transfer-staging / transfer-verified | 검사 전 / 검사 통과 파일 | transfer-api만 마운트 |

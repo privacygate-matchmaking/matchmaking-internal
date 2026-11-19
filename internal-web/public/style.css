@@ -249,3 +249,9 @@ dialog.confirm textarea:focus{outline:0;border-color:var(--blue);box-shadow:0 0 
 /* 회원 상세: 증빙 확인·이용권 */
 .facts .fact-verified{color:#17663a;font-weight:600}
 .facts .fact-note{color:var(--muted);font-size:11px}
+/* 보안 사건 대응 */
+.security-detail h4{font-size:13px;margin:22px 0 8px}
+.security-detail .form.one{display:grid;gap:8px;max-width:520px}
+.timeline{margin:0;padding-left:18px;font-size:12px;line-height:1.8;color:var(--muted)}
+.security-detail .form.one button{justify-self:start;width:auto}
+.security-detail textarea{font:inherit;font-size:13px}

@@ -41,6 +41,7 @@ class Connection:
         self.sql.create_function('now',0,lambda:datetime.now(timezone.utc).isoformat())
         self.sql.executescript("""
         CREATE TABLE users(user_id TEXT,pseudo_id TEXT,role TEXT,active INT);
+        CREATE TABLE account_locks(user_id TEXT,locked_until TEXT,reason TEXT,created_at TEXT);
         CREATE TABLE members(member_id TEXT,user_id TEXT,status TEXT,pseudo_id TEXT,name TEXT,birth_date TEXT,
             education_level TEXT,education_verified INT,employment_verified INT,job_group TEXT,
             contact_phone TEXT,contact_email TEXT);
