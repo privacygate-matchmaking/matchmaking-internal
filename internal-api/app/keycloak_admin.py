@@ -233,3 +233,22 @@ def delete_pending_staff(user_id: str) -> str:
     if resp.status_code not in (204, 404):
         raise KeycloakAdminError("delete_failed")
     return "deleted"
+
+
+# ---------------------------------------------------------------------------
+# 보안 사건 대응: 계정 정지(비활성 + 세션 종료)·복구. 총관리자(data_admin) 계정은 대상이 될 수 없다.
+# ---------------------------------------------------------------------------
+def set_account_enabled(user_id: str, enabled: bool) -> str:
+    """돌려주는 값: done / not_found. 정지할 때는 그 계정의 Keycloak 세션도 모두 끊는다."""
+    with _client() as c:
+        roles = _realm_roles(c, user_id)
+        if roles is None:
+            return "not_found"
+        if "data_admin" in roles:
+            raise KeycloakAdminError("data_admin_protected")
+        _set_enabled(c, user_id, enabled)
+        if not enabled:
+            resp = c.post(f"{_base()}/users/{user_id}/logout")
+            if resp.status_code not in (204, 404):
+                raise KeycloakAdminError("logout_failed")
+    return "done"

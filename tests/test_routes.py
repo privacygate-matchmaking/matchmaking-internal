@@ -70,6 +70,11 @@ EXPECTED = {
     ("GET", "/api/notifications"): "roles:approver,counselor,data_admin",          # 직원 알림 (명세 외 추가)
     ("POST", "/api/notifications/read"): "roles:approver,counselor,data_admin",
     ("POST", "/api/notifications/delete"): "roles:approver,counselor,data_admin",
+    ("GET", "/api/admin/security-incidents"): "roles:data_admin",                     # 보안 사건 대응 (명세 외 추가)
+    ("GET", "/api/admin/security-incidents/{incident_id}"): "roles:data_admin",
+    ("POST", "/api/admin/security-incidents/{incident_id}/status"): "roles:data_admin",
+    ("POST", "/api/admin/security-incidents/{incident_id}/actions"): "roles:data_admin",
+    ("POST", "/api/internal/security-events"): "service:transfer-api",                # 중계가 알리는 승인 외 자료 요청
 }
 
 

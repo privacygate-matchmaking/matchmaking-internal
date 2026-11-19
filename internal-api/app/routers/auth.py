@@ -11,7 +11,7 @@ from privacygate.tokens import code_challenge_s256, new_code_verifier, random_to
 
 from .. import audit, db
 from ..auth import oidc
-from ..auth.session import current_principal, require_csrf
+from ..auth.session import check_csrf, current_principal, require_csrf, session_principal
 from ..config import SESSION_COOKIE, get_settings
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -99,8 +99,8 @@ def callback(request: Request, code: str | None = None, state: str | None = None
 
 
 @router.post("/logout")
-def logout(request: Request, principal: Principal = Depends(current_principal),
-           _csrf: None = Depends(require_csrf)):
+def logout(request: Request, principal: Principal = Depends(session_principal)):
+    check_csrf(request)   # 임시 잠금 중에도 로그아웃은 된다 (세션 확인 + CSRF 만)
     with db.connection() as conn:
         conn.execute("DELETE FROM sessions WHERE session_hash = %s", (request.state.session_hash,))
     audit.allow(request, action="logout")

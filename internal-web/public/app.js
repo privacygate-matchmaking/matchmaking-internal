@@ -150,6 +150,7 @@ const LOADERS = {
   approvals: loadApprovals,
   meetings: loadMeetings,
   staff_signups: loadStaffSignups,
+  security: loadSecurity,
 };
 
 function selectView(name) {
@@ -760,7 +761,7 @@ async function revoke(label, approvalId) {
 
 
 const notif = { items: [], selected: new Set(), timer: null };
-const KIND_ICON = { evidence_submitted: "📄", match_made: "💞", intro_requested: "📨", intro_decided: "✅",
+const KIND_ICON = { security_incident: "🛡️", evidence_submitted: "📄", match_made: "💞", intro_requested: "📨", intro_decided: "✅",
   withdraw_requested: "⏳", withdraw_cancelled: "↩", member_deleted: "🗑", member_export: "⚠", member_assigned: "👤" };
 
 function timeAgo(iso) {
@@ -901,7 +902,15 @@ async function init() {
     };
   }
   const res = await api("/api/me");
-  if (res.status === 200) { state.me = await res.json(); showApp(); } else { showLogin(); }
+  if (res.status === 200) { state.me = await res.json(); showApp(); }
+  else {
+    showLogin();
+    if (res.status === 403) {   // 자동 임시 잠금·정지 등: 서버 안내 문구를 로그인 화면에 보여 준다
+      const body = await res.json().catch(() => ({}));
+      $("login-msg").textContent = body.error?.message || "지금은 이 계정을 사용할 수 없습니다.";
+      $("login-msg").hidden = false;
+    }
+  }
 }
 
 init();
@@ -926,5 +935,15 @@ async function loadStaffSignups() {
     toast: (text) => showResult($("staff-signup-result"), text, !/추적번호|실패|못했/.test(text)),
     confirmAsk: async (text) => (await ask("직원 가입 신청 처리", text,
       [{ label: "취소", value: "" }, { label: "확인", value: "ok", cls: "primary" }])) === "ok",
+  });
+}
+
+
+async function loadSecurity() {
+  $("security-result").hidden = true;
+  await SecurityUI.render({
+    root: $("security-panel"), api, describe,
+    ask, lastNote: () => state.askText || null,
+    toast: (text) => showResult($("security-result"), text, !/추적번호|실패|못했/.test(text)),
   });
 }

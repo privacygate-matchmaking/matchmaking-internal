@@ -3,7 +3,7 @@
 | 역할 | 시험 계정 | 할 수 있는 일 | 자동으로 주지 않는 권한 |
 |---|---|---|---|
 | counselor | `counselor_a` (내부 공격자 A), `counselor_b` | 담당 회원 조회·정보 수정·탈퇴 처리, 담당 회원 증빙 열람·심사, 반출 파일 업로드·신청(본인이 만든 내보내기 결과 등록 포함), 본인 신청 조회 | 전체 회원 내보내기, 증빙 제출·열람, 승인 |
-| data_admin (총관리자) | `data_admin` | 직원 가입 신청 승인·거절, 전체 회원 조회·정보 수정·탈퇴 처리, 전체 증빙 열람·심사, 전체 회원 내보내기·내역, 배정된 증빙 목록·열람·심사 | **반출 승인** |
+| data_admin (총관리자) | `data_admin` | 보안 사건 확인·조치(잠금 해제·계정 정지·복구·받은 자료 회수), 직원 가입 신청 승인·거절, 전체 회원 조회·정보 수정·탈퇴 처리, 전체 증빙 열람·심사, 전체 회원 내보내기·내역, 배정된 증빙 목록·열람·심사 | **반출 승인** |
 | approver | `approver` | 반출 신청 검토·승인·거절·회수 | **전체 내보내기, 원본 증빙 열람** |
 | member | `member_b` (외부 공범 B) | 본인 증빙 제출·심사 상태 확인, 매칭, 본인 동의 등록·철회, 본인 탈퇴 신청·철회, 나에게 온 전달 목록·다운로드 (외부 화면만) | 내부 화면 로그인, 증빙 원본 열람, 다른 회원 명의 동의 |
 | (Keycloak 운영) | `infra_admin` | Keycloak 관리 콘솔 | 업무 데이터 접근 |
@@ -33,7 +33,10 @@
   - internal-api `/api/evidence-files` ← `transfer-api` (+ 회원 access token, 회원 증빙 제출)
   - internal-api `/api/internal/member-signups` ← `transfer-api` (회원 토큰 없음, 회원가입) / transfer-api 같은 경로 ← `external-api`
   - transfer-api `/api/internal/*` ← `external-api` (+ 회원 access token)
-  - Keycloak 관리 API ← internal-api 의 `internal-admin` client (탈퇴 회원 세션 종료·계정 삭제만)
+  - Keycloak 관리 API ← internal-api 의 `internal-admin` client (탈퇴 회원 세션 종료·계정 삭제, 보안 사건 대응 계정 정지·복구)
+  - internal-api `/api/internal/security-events` ← `transfer-api` (+ 회원 access token, 공격 ② 알림)
+
+- 사후 대응: 같은 계정이 60초 안에 3번 거부(직원 역할 밖 요청 / 회원 승인 외 자료 요청)되면 15분 자동 임시 잠금. 보안 사건 조회·조치는 총관리자만. 계정 정지·복구는 `set_account_active` 함수가 활성 총관리자인지 다시 확인하며, 본인·다른 총관리자는 대상이 될 수 없다. Keycloak 비활성·세션 종료는 `internal-admin` client 로 하며 data_admin 역할 계정은 거부한다.
 
 권한 자동 시험 (`matchmaking-internal/tests/test_permissions.py`, internal-api 컨테이너에서 실행)
 - 다른 상담 직원 담당 회원 조회·수정·탈퇴·철회 404, 증빙 목록에 안 보임
@@ -42,6 +45,13 @@
 - 승인 담당 회원 조회 403, 상담 직원 전체 내보내기 403, 총관리자 소개 자료 요청 403
 - 회원 기능은 서비스 토큰 없으면 401, 직원 처리 탈퇴는 회원이 철회 불가, 유예 중 매칭 403
 - Keycloak 정리: member 계정만 삭제, 직원 역할이 있으면 거부
+
+사후 대응 자동 시험 (`matchmaking-internal/tests/test_security_response.py`, internal-api 컨테이너에서 실행, upgrade/014 필요)
+- 공격 ① 3회 → 403×3, 내보내기 파일 0, 사건 1건(3회), 자동 잠금 → 이후 허용 경로도 403, 다른 직원은 영향 없음
+- 거부 2회는 잠그지 않음, 60초 지난 신호는 세지 않음, 다른 역할 밖 경로 반복도 잠금
+- 감사 파일·감사 DB 기록이 모두 실패해도 차단·잠금 동작 (Wazuh 수집 중단 대비)
+- 총관리자 잠금 해제·정지(세션 삭제 → 401)·복구, 본인·총관리자 정지 409, 사건 API 는 총관리자만, 자료 회수는 회원 대상 사건만
+- 중계 알림 3회 → 회원 잠금(my-status locked), 정지 → suspended
 
 인증
 - 직원·회원 모두 ID·비밀번호 (OTP 사용 안 함)

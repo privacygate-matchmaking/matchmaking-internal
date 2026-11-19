@@ -22,7 +22,7 @@ from privacygate.errors import ErrorCode, GateError
 from privacygate.policy import STAFF_ROLES, Principal, Role
 from pydantic import BaseModel, Field
 
-from .. import audit, db, evidence_rules, inspection, jobs, notify, storage, transfer_client
+from .. import audit, db, evidence_rules, inspection, jobs, notify, security, storage, transfer_client
 from . import member_notify
 from ..auth.session import member_token_via_transfer, member_via_transfer, require, require_csrf, require_service
 from ..config import get_settings
@@ -430,6 +430,11 @@ def create_member_export(request: Request,
                        "⚠ 비정상 전체 회원 내보내기" if odd else "전체 회원 내보내기 실행",
                        f"{principal.pseudo_id}({principal.role}) · {len(rows)}건", "manage",
                        exclude=None if odd else principal.user_id)
+        if odd:   # baseline 에서 역할 검사를 건너뛰어 통과한 경우: 막지 못했으므로 '차단 안 됨' 사건으로 남긴다
+            security.record_incident(conn, kind="unauthorized_export", severity="high",
+                                     subject=security.staff_subject(principal), source="internal-api",
+                                     detail=f"{security.EXPORT_ACTION} · {getattr(request.state, 'gate_bypass', 'role_mismatch')}",
+                                     trace=request.state.trace_id, blocked=False)
     audit.allow(request, target_type="member_export", target_id=str(export_id))
     return {"export_id": str(export_id), "row_count": len(rows), "created_at": _iso(row["created_at"])}
 
@@ -1044,11 +1049,18 @@ def my_status(request: Request, sub: str = Depends(member_token_via_transfer)):
         m = conn.execute(
             """SELECT m.status, m.withdraw_at, m.withdraw_reason,
                       (m.withdraw_requested_by IS DISTINCT FROM m.user_id) AS by_staff
+                      , u.active
                  FROM members m JOIN users u ON u.user_id = m.user_id
-                WHERE m.user_id = %s AND u.active AND u.role = 'member'""", (sub,)).fetchone()
+                WHERE m.user_id = %s AND u.role = 'member'""", (sub,)).fetchone()
         notice = None if m else conn.execute(
             "SELECT by_staff, reason, withdrawn_at FROM withdrawal_notices WHERE user_id = %s", (sub,)).fetchone()
+        locked = security.locked_until(conn, sub) if m else None
     audit.allow(request, target_type="member_status")
+    # 보안 사건 대응: 총관리자 정지·자동 임시 잠금 (중계가 이 상태를 보고 회원 기능을 막는다)
+    if m and not m["active"]:
+        return {"status": "suspended", "message": "보안 점검으로 이용이 정지된 계정입니다. 고객센터로 문의해 주세요."}
+    if locked:
+        return {"status": "locked", "message": security.lock_message(locked)}
     if m and m["status"] == "active":
         return {"status": "active", "message": None}
     if m:

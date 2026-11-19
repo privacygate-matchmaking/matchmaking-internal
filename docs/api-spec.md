@@ -56,6 +56,18 @@ Keycloak client: `internal-web`, `external-web` · 쿠키: `internal_session`, `
 | GET | /api/internal/my-consents | 서비스: transfer-api + 회원 토큰 | 내 동의 목록 ※명세 외 추가 |
 | POST | /api/internal/my-consents | 서비스: transfer-api + 회원 토큰 | 동의 등록 (상대 회원·항목·목적·만료) ※명세 외 추가 |
 | POST | /api/internal/my-consents/{consent_id}/revoke | 서비스: transfer-api + 회원 토큰 | 동의 철회 ※명세 외 추가 |
+| GET | /api/admin/security-incidents?status=open\|all | data_admin | 보안 사건 목록 `{items:[{incident_id, kind, title, severity, subject_code, subject_role, source, detail, trace_id, blocked, occurrences, auto_locked_until, status, note, first_seen_at, last_seen_at, subject:{exists, active, locked_until}}], counts}` (이름·연락처 없음) ※사후 대응 |
+| GET | /api/admin/security-incidents/{incident_id} | data_admin | 사건 상세 + 조치 기록 `actions:[{action, result, detail, actor, created_at}]` ※사후 대응 |
+| POST | /api/admin/security-incidents/{incident_id}/status | data_admin + CSRF | 검토 상태 `{status: new\|reviewing\|resolved\|false_positive, note}` ※사후 대응 |
+| POST | /api/admin/security-incidents/{incident_id}/actions | data_admin + CSRF | 조치 `{action, note}`: `unlock`(임시 잠금 해제) · `suspend_account`(users.active=false + 직원 세션 삭제 + Keycloak 비활성·세션 종료, 본인·총관리자 불가 409) · `restore_account`(복구 + 잠금 해제) · `revoke_deliveries`(회원 대상 사건만: 중계에서 그 회원이 받은 승인 모두 회수). 첫 조치 시 상태 new → reviewing ※사후 대응 |
+| POST | /api/internal/security-events | 서비스: transfer-api + 회원 토큰 | 중계가 알리는 공격 ② `{kind:"approval_mismatch", reason, blocked, delivery_id}` → 보안 사건, 같은 회원 60초 3회면 15분 잠금 `{incident_id, locked_until, newly_locked}`. 대상 회원은 본문이 아니라 회원 토큰으로 정한다 ※사후 대응 |
+
+## 사후 대응 (자동 임시 잠금·보안 사건)
+- **자동 임시 잠금**: 직원이 역할 밖 경로를 60초 안에 3번 요청(`role_not_allowed`)하거나, 회원의 승인 외 자료 요청을 중계가 60초 안에 3번 알리면 그 계정을 15분 잠근다. 잠긴 직원은 모든 업무 API 가 403 `account_temporarily_locked`(안내 문구에 해제 시각), 잠긴 회원은 `my-status` 가 `locked` 를 돌려줘 중계가 회원 기능을 막는다.
+- **보안 사건**: 공격 ①(상담 직원의 관리자 내보내기)은 첫 시도부터, 공격 ②는 중계 알림마다 사건으로 남는다(같은 계정·종류의 열린 사건이 10분 안이면 횟수만 증가). baseline 에서 통과한 시도도 `blocked=false` 사건으로 남는다 (탐지는 되지만 막지 못함).
+- **계정 정지**: 업무 DB `users.active` 변경은 SECURITY DEFINER 함수 `set_account_active` 로만 (앱 계정에 users UPDATE 권한 없음). 정지된 회원은 `my-status` 가 `suspended`.
+- 사건·잠금 처리 실패는 차단 결정을 바꾸지 않는다 (거부 응답은 그대로). 감사 로그 파일(Wazuh 수집)·감사 DB 기록이 실패해도 차단·잠금은 동작한다.
+- 감사 로그: `security.auto_lock`, `security.unlock` · `security.suspend_account` · `security.restore_account` · `security.revoke_deliveries`, `security.incident_status`, 중계 `security.report`. Wazuh 규칙 100150~100153.
 
 ## 중계 (transfer-api)
 내부 직원 화면은 internal-api 를 거쳐 호출한다 (internal-api 가 1차 역할 확인 후, 서버에 보관한 사용자 access token 을 붙여 전달).
@@ -75,11 +87,13 @@ Keycloak client: `internal-web`, `external-web` · 쿠키: `internal_session`, `
 | GET | /api/internal/evidence-submissions | 서비스: external-api + 회원 토큰 | 내 증빙 심사 상태 전달 ※명세 외 추가 |
 | GET·POST | /api/internal/member-consents | 서비스: external-api + 회원 토큰 | 내 동의 목록·등록 전달 ※명세 외 추가 |
 | POST | /api/internal/member-consents/{consent_id}/revoke | 서비스: external-api + 회원 토큰 | 동의 철회 전달 ※명세 외 추가 |
+| POST | /api/security/recipients/{user_id}/revoke-deliveries | data_admin (internal-api 사건 화면 경유) | 그 회원이 받은 승인 자료를 모두 회수 `{recipient_id, revoked}` ※사후 대응 |
 
 - 검사 통과(`passed`)와 제공 승인(`approved`)은 별개다. 반출 금지 자료는 승인으로도 허용되지 않는다.
 - 직원 승인과 회원 동의를 각각 확인한다 (동의는 disclosure-checks 로 internal-api 에 질의).
 - 다운로드는 `delivery_id` 기준으로 **서버가** 승인된 file_id·file_version·file_hash 를 고른다. 요청의 file_id 는 따르지 않는다 (공격 ② 차단).
 - external-api 가 전달하는 사용자 정보는 Keycloak 이 서명한 회원 access token(aud=transfer-api)이다. 단순 user_id 문자열은 믿지 않는다.
+- 다운로드가 `requested_file_not_approved`·`recipient_mismatch` 로 거부되면 internal-api `POST /api/internal/security-events` 로 알린다 (회원 토큰 함께). baseline 에서 바꿔치기 파일을 내준 경우는 `blocked=false` 로 알린다. 알림 실패는 감사 로그 `security.report` error 로만 남고 거부는 그대로다.
 
 ## 외부 (external-api)
 | 메서드 | 경로 | 허용 | 설명 |
