@@ -336,6 +336,28 @@ class SecurityResponse(unittest.TestCase):
         with self.as_member(MEMBER_B) as m:
             self.assertEqual(m.get("/api/internal/my-status").json()["status"], "suspended")
 
+    # ---------- 다운로드 토큰 오용 (중계가 알림) ----------
+    def test_token_misuse_reports_and_locks(self):
+        body = {"kind": "download_token_misuse", "reason": "download_token_used", "blocked": True,
+                "delivery_id": str(uuid.uuid4())}
+        with self.as_member(MEMBER_B) as m:
+            first = m.post("/api/internal/security-events", json={**body, "reason": "download_token_required"})
+            self.assertEqual(first.status_code, 200, first.text)
+            m.post("/api/internal/security-events", json=body)
+            third = m.post("/api/internal/security-events", json=body).json()
+            self.assertTrue(third["newly_locked"])
+            self.assertEqual(m.get("/api/internal/my-status").json()["status"], "locked")
+            bad = m.post("/api/internal/security-events", json={**body, "kind": "something_else"})
+            self.assertEqual(bad.status_code, 422)
+        inc = self.incidents(MEMBER_B, "download_token_misuse")
+        self.assertEqual(len(inc), 1)
+        self.assertEqual(inc[0]["severity"], "medium")          # 첫 사건(토큰 생략)의 등급, 이후 횟수만 늘어남
+        self.assertGreaterEqual(inc[0]["occurrences"], 3)
+        self.assertIsNotNone(inc[0]["auto_locked_until"])
+        with self.db.connection() as conn:
+            reason = conn.execute("SELECT reason FROM account_locks WHERE user_id = %s", (MEMBER_B,)).fetchone()["reason"]
+        self.assertEqual(reason, "repeated_download_token_misuse")
+
     def test_baseline_detected_but_not_blocked_is_recorded(self):
         if os.environ.get("ALLOW_EXPORT_TEST") != "1":
             self.skipTest("실제 내보내기 행을 만드는 시험 (ALLOW_EXPORT_TEST=1 일 때만)")

@@ -3,6 +3,8 @@
 - 직원이 역할 밖 경로를 60초 안에 3번 요청하면(role_not_allowed) 15분 동안 그 계정의 모든 요청을 막는다.
 - 공격 ①(상담 직원의 관리자 전체 내보내기)은 첫 시도부터 보안 사건으로 남긴다. baseline 에서 통과한 경우도 '차단 안 됨'으로 남긴다.
 - 공격 ②(회원의 승인 외 파일 요청)는 중계(transfer-api)가 알려 오면 보안 사건으로 남기고, 같은 회원이 60초 안에 3번 하면 잠근다.
+- 일회용 다운로드 토큰 재사용·위조·생략(download_token_used/invalid/required)도 중계가 알려 오면 사건으로 남기고,
+  같은 회원이 60초 안에 3번 하면 잠근다 (중계는 그 제공 건의 남은 토큰도 즉시 폐기한다).
 - 사건에는 계정 id·직원/회원 코드·사유 코드만 넣는다 (이름·연락처·파일 내용 없음).
 - 이 모듈의 실패는 차단 결정을 바꾸지 않는다 (호출하는 쪽에서 예외를 삼킨다).
 """
@@ -27,7 +29,8 @@ KST = timezone(timedelta(hours=9))
 
 KIND_TITLE = {"unauthorized_export": "권한 밖 전체 회원 내보내기 시도",
               "approval_mismatch": "승인 외 자료 다운로드 시도",
-              "repeated_denials": "역할 밖 요청 반복"}
+              "repeated_denials": "역할 밖 요청 반복",
+              "download_token_misuse": "일회용 다운로드 토큰 재사용·위조 시도"}
 
 
 def _now() -> datetime:

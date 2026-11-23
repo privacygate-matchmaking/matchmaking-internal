@@ -175,10 +175,11 @@ def incident_action(incident_id: uuid.UUID, body: ActionIn, request: Request,
 
 
 # ---------------------------------------------------------------------------
-# 중계(transfer-api) → 내부: 회원의 승인 외 자료 요청 알림. 대상은 본문이 아니라 검증된 회원 토큰(X-User-Token)으로 정한다.
+# 중계(transfer-api) → 내부: 회원의 승인 외 자료 요청·다운로드 토큰 오용 알림.
+# 대상은 본문이 아니라 검증된 회원 토큰(X-User-Token)으로 정한다.
 # ---------------------------------------------------------------------------
 class SecurityEventIn(BaseModel):
-    kind: Literal["approval_mismatch"]
+    kind: Literal["approval_mismatch", "download_token_misuse"]
     reason: str = Field(pattern=r"^[a-z_]{1,64}$")
     blocked: bool
     delivery_id: uuid.UUID | None = None
@@ -190,13 +191,15 @@ def security_event(body: SecurityEventIn, request: Request, sub: str = Depends(m
         row = conn.execute("SELECT user_id, pseudo_id, role FROM users WHERE user_id = %s", (sub,)).fetchone()
         subject = {"user_id": sub, "code": row["pseudo_id"] if row else None, "role": row["role"] if row else "member"}
         detail = body.reason + (f" · delivery {str(body.delivery_id)[:8]}" if body.delivery_id else "")
-        incident_id, _ = security.record_incident(conn, kind=body.kind, severity="high", subject=subject,
+        # 토큰 생략(download_token_required)은 화면을 거치지 않은 직접 호출 의심이라 중간, 재사용·위조는 높음
+        severity = "medium" if body.reason == "download_token_required" else "high"
+        incident_id, _ = security.record_incident(conn, kind=body.kind, severity=severity, subject=subject,
                                                   source="transfer-api", detail=detail, trace=trace_id(request),
                                                   blocked=body.blocked)
         until = None
-        if body.blocked and security.add_signal(conn, sub, "approval_mismatch") >= security.LOCK_THRESHOLD:
+        if body.blocked and security.add_signal(conn, sub, body.kind) >= security.LOCK_THRESHOLD:
             until = security.apply_lock(conn, request, subject, kind=body.kind, source="transfer-api",
-                                        reason="repeated_approval_mismatch")
+                                        reason=f"repeated_{body.kind}")
         locked = security.locked_until(conn, sub)
     audit.allow(request, action="security.incident", target_type="security_incident", target_id=incident_id,
                 reason=body.reason)

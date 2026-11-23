@@ -119,9 +119,9 @@
 | 일회용 다운로드 토큰 | 내려받기 직전에 발급, 60초·1회, DB 에는 해시만. 재사용·다른 제공 건·만료는 거부. 승인 회수·자료 회수 시 미사용 토큰 폐기 |
 | 다운로드 횟수 제한 | 제공 건당 5회 (보기 포함). 넘으면 `download_limit_reached` |
 | 감사 로그 공통 형식 | 정책 버전, 자료 소유자·수신자 UUID, 동의·승인·파일 ID, 파일 해시를 모든 서비스가 같은 이름으로 기록 |
-| 감사 로그 위변조 방지 | 파일: SHA-256 해시 체인 + 0640 + `audit-verify.sh` (Wazuh 100160·100161). DB: 수정·삭제·TRUNCATE 트리거 차단, 365일 지난 행만 운영자가 삭제 |
+| 감사 로그 위변조 방지 | 파일: SHA-256 해시 체인 + 0640 + `audit-verify.sh` (Wazuh 100160·100161). 체인 재계산 위조는 DB `audit_anchors`(추가만) 앵커로 탐지 (100162). DB: 수정·삭제·TRUNCATE 트리거 차단, 365일 지난 행만 운영자가 삭제 |
 | Keycloak 이벤트 | 로그인 실패·잠금·역할 변경을 감사 로그로 옮겨 Wazuh 가 탐지 (100180~100183) |
-| 서비스 간 mTLS (선택 overlay `compose.mtls.yaml`) | internal-api·transfer-api 는 사설 CA 서명 클라이언트 인증서가 있는 연결만 받음. internal-web(nginx)·internal-api·transfer-api·external-api 가 각자 인증서로 호출. 서비스 토큰 검사와 함께 동작 |
+| 서비스 간 mTLS + 호출자 고정 (선택 overlay `compose.mtls.yaml`) | 서버마다 자기 호출자만 서명한 클라이언트 CA 만 신뢰(internal-api ← internal-web·transfer-api, transfer-api ← internal-api·external-api). 서버 인증서는 server-ca·SAN=서비스 이름. 같은 CA 의 호출자는 인증서 CN 으로 경로 분리(PeerGuard, 어긋나면 403 + Wazuh 100178). 서비스 토큰 검사와 함께 동작 |
 | Wazuh 수집 확대 | nginx 접속 기록(JSON, 쿼리 없음), 컨테이너 시작·종료·OOM(호스트 docker events, Wazuh 에 소켓 미제공), 세 레포 파일 무결성 검사(비밀값 폴더 제외·해시만) → 100192~100212 |
 | Wazuh 대시보드 | "PrivacyGate 관제": 허용·거부, 거부 사유, 위험도별·분야별 경보, 서비스별 마지막 수신 시각, trace_id 추적 |
 

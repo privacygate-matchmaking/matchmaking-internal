@@ -60,7 +60,7 @@ Keycloak client: `internal-web`, `external-web` · 쿠키: `internal_session`, `
 | GET | /api/admin/security-incidents/{incident_id} | data_admin | 사건 상세 + 조치 기록 `actions:[{action, result, detail, actor, created_at}]` ※사후 대응 |
 | POST | /api/admin/security-incidents/{incident_id}/status | data_admin + CSRF | 검토 상태 `{status: new\|reviewing\|resolved\|false_positive, note}` ※사후 대응 |
 | POST | /api/admin/security-incidents/{incident_id}/actions | data_admin + CSRF | 조치 `{action, note}`: `unlock`(임시 잠금 해제) · `suspend_account`(users.active=false + 직원 세션 삭제 + Keycloak 비활성·세션 종료, 본인·총관리자 불가 409) · `restore_account`(복구 + 잠금 해제) · `revoke_deliveries`(회원 대상 사건만: 중계에서 그 회원이 받은 승인 모두 회수). 첫 조치 시 상태 new → reviewing ※사후 대응 |
-| POST | /api/internal/security-events | 서비스: transfer-api + 회원 토큰 | 중계가 알리는 공격 ② `{kind:"approval_mismatch", reason, blocked, delivery_id}` → 보안 사건, 같은 회원 60초 3회면 15분 잠금 `{incident_id, locked_until, newly_locked}`. 대상 회원은 본문이 아니라 회원 토큰으로 정한다 ※사후 대응 |
+| POST | /api/internal/security-events | 서비스: transfer-api + 회원 토큰 | 중계가 알리는 공격 ②·토큰 오용 `{kind:"approval_mismatch"\|"download_token_misuse", reason, blocked, delivery_id}` → 보안 사건(토큰 생략은 medium, 그 외 high), 같은 회원·같은 종류 60초 3회면 15분 잠금 `{incident_id, locked_until, newly_locked}`. 대상 회원은 본문이 아니라 회원 토큰으로 정한다 ※사후 대응 |
 
 ## 사후 대응 (자동 임시 잠금·보안 사건)
 - **자동 임시 잠금**: 직원이 역할 밖 경로를 60초 안에 3번 요청(`role_not_allowed`)하거나, 회원의 승인 외 자료 요청을 중계가 60초 안에 3번 알리면 그 계정을 15분 잠근다. 잠긴 직원은 모든 업무 API 가 403 `account_temporarily_locked`(안내 문구에 해제 시각), 잠긴 회원은 `my-status` 가 `locked` 를 돌려줘 중계가 회원 기능을 막는다.
@@ -72,6 +72,8 @@ Keycloak client: `internal-web`, `external-web` · 쿠키: `internal_session`, `
 ## 감사 로그 공통 형식·위변조 방지 (보안 강화)
 - 모든 서비스(내부·외부·중계)가 privacygate `AuditWriter` 로 같은 형식을 쓴다: `ts, service, trace_id, actor, role, action, target_type, target_id, result, reason, policy_version` + 자료 제공 시 `owner_id, recipient_id, consent_id, approval_id, file_id, file_hash`. 비밀번호·세션·토큰 원문·주민번호·연락처는 필드가 없어 기록할 수 없다.
 - JSON 파일 각 줄에 `seq, prev_hash, hash` (SHA-256 해시 체인). `infra/scripts/audit-verify.sh` 가 수정·삭제·순서 변경·누락을 찾아 `audit-verifier.json` 에 결과를 남긴다 (Wazuh 100160·100161). 파일은 0640.
+- 앵커: `audit-verify.sh` 가 검사마다 파일별 마지막 `(seq, hash)` 를 business DB `audit_anchors`(app_user SELECT·INSERT, 트리거로 수정·삭제·TRUNCATE 불가)에 남기고 이전 앵커와 대조 → 체인 재계산·잘라내기 탐지 (`audit_anchor_mismatch`, Wazuh 100162). 정당한 초기화는 db_owner 가 `audit_anchor_resets` 에 기록 (앱 계정은 읽기만).
+- mTLS 호출자 고정(`MTLS_PEER_POLICY=internal-api`): `/api/internal/*` 은 transfer-api 인증서만, 나머지는 internal-web 인증서만. 위반은 403 + 감사 `mtls_peer_not_allowed` (actor `svc:<CN>`, Wazuh 100178). internal-web nginx 는 `/api/internal/` 을 404 로 막는다.
 - DB `audit_log` (업무·중계): 앱 계정은 INSERT 만, 트리거로 DB 소유자도 UPDATE·DELETE·TRUNCATE 불가. 보관기간(365일 이상) 지난 행만 `SELECT purge_audit_log(365)` (운영자).
 - Keycloak 로그인 실패·직원 로그인·역할/그룹 변경 이벤트를 internal-api 가 30초마다 읽어 같은 형식(`keycloak.*`)으로 남긴다 (Wazuh 100180~100183). IP·비밀번호는 남기지 않는다.
 
@@ -101,6 +103,9 @@ Keycloak client: `internal-web`, `external-web` · 쿠키: `internal_session`, `
 - 다운로드는 `delivery_id` 기준으로 **서버가** 승인된 file_id·file_version·file_hash 를 고른다. 요청의 file_id 는 따르지 않는다 (공격 ② 차단).
 - external-api 가 전달하는 사용자 정보는 Keycloak 이 서명한 회원 access token(aud=transfer-api)이다. 단순 user_id 문자열은 믿지 않는다.
 - 다운로드가 `requested_file_not_approved`·`recipient_mismatch` 로 거부되면 internal-api `POST /api/internal/security-events` 로 알린다 (회원 토큰 함께). baseline 에서 바꿔치기 파일을 내준 경우는 `blocked=false` 로 알린다. 알림 실패는 감사 로그 `security.report` error 로만 남고 거부는 그대로다.
+- 토큰 오용 대응: `download_token_used`(내려받기에 쓴 토큰 재사용)·`download_token_invalid`(위조·다른 건 토큰)·`download_token_required`(토큰 없이 직접 호출)로 거부되면 ① 그 제공 건의 남은 토큰을 즉시 폐기(`revoked_at`, 감사 `security.token_containment`, Wazuh 100154) ② internal-api 에 `kind=download_token_misuse` 로 알린다(60초 3회면 15분 잠금). 새 토큰 발급·회수·보안 조치로 폐기된 토큰은 `download_token_revoked`(정상 사용자도 겪을 수 있어 오용으로 세지 않음), 만료는 `download_token_expired`.
+- 무결성 불일치 대응: 저장소 파일 해시가 승인 해시와 다르면(`actual_file_hash_mismatch`) 그 파일을 `export_banned=true, scan_reason=integrity_quarantine` 로 격리한다 (감사 `security.file_quarantine`, Wazuh 100121). 원본을 되돌려도 격리는 유지되며, 운영자가 해시 일치를 확인한 뒤 해제한다 (`hardening/file-tamper.sh release`).
+- mTLS 호출자 고정(`MTLS_PEER_POLICY=transfer-api`): `/api/internal/*` 은 external-api 인증서만, 나머지(반출·승인·매칭 관리)는 internal-api 인증서만. 위반은 403 + 감사 `mtls_peer_not_allowed` (Wazuh 100178).
 
 ## 외부 (external-api)
 | 메서드 | 경로 | 허용 | 설명 |
